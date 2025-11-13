@@ -229,9 +229,17 @@ export default function RCCarController() {
         
         let errorMessage = 'Connection failed';
         if (cleanIP.includes('.ngrok')) {
-          errorMessage = 'ngrok connection failed. Check server is running.';
-          console.error(`   💡 Make sure Python server is running on Pi`);
-          console.error(`   💡 Run: python3 raspberry-pi-server.py`);
+          errorMessage = 'Unable to connect to ngrok server';
+          console.error(`   💡 Troubleshooting steps:`);
+          console.error(`   1. Make sure Python server is running on Pi: python3 raspberry-pi-server.py`);
+          console.error(`   2. Check ngrok is running: ngrok http 8765 --host-header=rewrite`);
+          console.error(`   3. Verify ngrok URL in settings matches tunnel URL`);
+          console.error(`   4. Try regenerating ngrok tunnel (restart ngrok)`);
+        } else {
+          console.error(`   💡 Troubleshooting steps:`);
+          console.error(`   1. Verify Python server is running: python3 raspberry-pi-server.py`);
+          console.error(`   2. Check devices are on same WiFi network`);
+          console.error(`   3. Verify IP address is correct: hostname -I`);
         }
         
         setConnectionError(errorMessage);
@@ -391,9 +399,20 @@ export default function RCCarController() {
                   </Text>
                 )}
                 {piIP.includes('.ngrok') && (
-                  <Text style={[styles.errorHint, { color: '#fca5a5', marginTop: 4 }]}>
-                    💡 Make sure Python server is running on Pi
-                  </Text>
+                  <View style={{ marginTop: 6, gap: 2 }}>
+                    <Text style={[styles.errorHint, { color: '#fca5a5', fontWeight: '700' as const }]}>
+                      Troubleshooting:
+                    </Text>
+                    <Text style={[styles.errorHint, { color: '#fca5a5' }]}>
+                      1. Python server running on Pi?
+                    </Text>
+                    <Text style={[styles.errorHint, { color: '#fca5a5' }]}>
+                      2. ngrok running with correct command?
+                    </Text>
+                    <Text style={[styles.errorHint, { color: '#fca5a5' }]}>
+                      3. URL matches ngrok tunnel?
+                    </Text>
+                  </View>
                 )}
               </View>
             )}

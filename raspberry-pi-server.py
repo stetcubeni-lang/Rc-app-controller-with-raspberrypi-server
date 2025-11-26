@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-RC Car WebSocket Server for Raspberry Pi
-==========================================
+RC Car WebSocket Server + Camera Streaming for Raspberry Pi
+============================================================
 
-This server receives commands from the mobile app and controls the RC car.
+This server receives commands from the mobile app, controls the RC car,
+and streams the Raspberry Pi camera feed over HTTP.
 It automatically starts ngrok tunnel for remote access.
 
 Requirements:
-    pip install websockets asyncio lgpio
+    pip install websockets asyncio lgpio aiohttp picamera2 pillow
     Install ngrok: https://ngrok.com/download
 
 Hardware Setup - GPIO Pin Assignments:
@@ -43,6 +44,8 @@ import logging
 import subprocess
 import time
 from typing import Set
+from aiohttp import web
+import io
 
 # Configure logging
 logging.basicConfig(
@@ -59,6 +62,19 @@ try:
 except ImportError:
     GPIO_AVAILABLE = False
     logger.warning("lgpio library not available - running in simulation mode")
+
+# Try to import picamera2 for camera streaming
+try:
+    from picamera2 import Picamera2
+    from picamera2.encoders import JpegEncoder
+    from picamera2.outputs import FileOutput
+    import threading
+    CAMERA_AVAILABLE = True
+    logger.info("picamera2 library loaded - camera streaming enabled")
+except ImportError:
+    CAMERA_AVAILABLE = False
+    logger.warning("picamera2 library not available - camera streaming disabled")
+    logger.warning("Install with: sudo apt install -y python3-picamera2")
 
 # ========================================
 # GPIO PIN ASSIGNMENT LIST
@@ -81,6 +97,79 @@ PWM_FREQUENCY = 50
 
 # Connected clients
 connected_clients: Set[websockets.WebSocketServerProtocol] = set()
+
+# Camera streaming
+class StreamingOutput(io.BufferedIOBase):
+    """Buffer for camera frames"""
+    def __init__(self):
+        self.frame = None
+        self.condition = threading.Condition()
+
+    def write(self, buf):
+        with self.condition:
+            self.frame = buf
+            self.condition.notify_all()
+
+class CameraStreamer:
+    """Manages Raspberry Pi camera streaming"""
+    def __init__(self):
+        self.camera = None
+        self.output = None
+        self.encoder = None
+        
+        if CAMERA_AVAILABLE:
+            self.setup_camera()
+    
+    def setup_camera(self):
+        """Initialize camera"""
+        try:
+            self.camera = Picamera2()
+            
+            # Configure camera for streaming
+            # Lower resolution for better performance
+            config = self.camera.create_video_configuration(
+                main={"size": (640, 480), "format": "RGB888"},
+                encode="main"
+            )
+            self.camera.configure(config)
+            
+            # Create output buffer
+            self.output = StreamingOutput()
+            self.encoder = JpegEncoder(q=70)  # Quality 70 (0-100)
+            
+            # Start camera
+            self.camera.start_recording(self.encoder, FileOutput(self.output))
+            
+            logger.info("✅ Camera initialized successfully (640x480, JPEG quality 70)")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize camera: {e}")
+            logger.error("   Make sure camera is enabled: sudo raspi-config")
+            logger.error("   Interface Options -> Camera -> Enable")
+            self.camera = None
+    
+    def get_frame(self):
+        """Get latest frame"""
+        if not self.output:
+            return None
+        
+        with self.output.condition:
+            self.output.condition.wait()
+            return self.output.frame
+    
+    def cleanup(self):
+        """Stop camera"""
+        if self.camera:
+            try:
+                self.camera.stop_recording()
+                self.camera.close()
+                logger.info("Camera stopped")
+            except:
+                pass
+
+# Initialize camera
+camera_streamer = None
+if CAMERA_AVAILABLE:
+    camera_streamer = CameraStreamer()
 
 class RCCarController:
     """Controls the RC car hardware via GPIO"""
@@ -337,6 +426,88 @@ async def handle_client(websocket: websockets.WebSocketServerProtocol):
         rc_car.set_brake(0)
         rc_car.set_honk(False)
 
+# HTTP handlers for camera streaming
+async def stream_handler(request):
+    """MJPEG stream handler"""
+    if not camera_streamer or not camera_streamer.output:
+        return web.Response(text="Camera not available", status=503)
+    
+    response = web.StreamResponse()
+    response.content_type = 'multipart/x-mixed-replace; boundary=FRAME'
+    await response.prepare(request)
+    
+    try:
+        while True:
+            frame = await asyncio.get_event_loop().run_in_executor(
+                None, camera_streamer.get_frame
+            )
+            if frame:
+                await response.write(
+                    b'--FRAME\r\n'
+                    b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n'
+                )
+    except Exception as e:
+        logger.error(f"Stream error: {e}")
+    finally:
+        await response.write_eof()
+    
+    return response
+
+async def root_handler(request):
+    """Root handler - info page"""
+    action = request.query.get('action', '')
+    
+    if action == 'stream':
+        return await stream_handler(request)
+    
+    html = """
+    <html>
+    <head>
+        <title>RC Car Camera</title>
+        <style>
+            body { 
+                background: #1a1410; 
+                color: #f59e0b; 
+                font-family: monospace; 
+                padding: 20px;
+                text-align: center;
+            }
+            img { 
+                max-width: 100%; 
+                border: 2px solid #f59e0b; 
+                border-radius: 8px;
+            }
+            h1 { color: #f59e0b; }
+        </style>
+    </head>
+    <body>
+        <h1>🎥 RC Car Camera Stream</h1>
+        <p>Camera Status: """ + ("✅ Active" if camera_streamer else "❌ Not Available") + """</p>
+        """ + ("""
+        <img src="/?action=stream" />
+        <p>Stream URL: http://YOUR_PI_IP:8080/?action=stream</p>
+        """ if camera_streamer else """
+        <p>Install picamera2: sudo apt install -y python3-picamera2</p>
+        <p>Enable camera: sudo raspi-config -> Interface Options -> Camera</p>
+        """) + """
+    </body>
+    </html>
+    """
+    return web.Response(text=html, content_type='text/html')
+
+async def start_http_server():
+    """Start HTTP server for camera streaming"""
+    app = web.Application()
+    app.router.add_get('/', root_handler)
+    
+    runner = web.AppRunner(app)
+    await runner.setup()
+    
+    site = web.TCPSite(runner, '0.0.0.0', 8080)
+    await site.start()
+    
+    logger.info("📹 HTTP Camera Server started on port 8080")
+
 async def start_ngrok():
     """Start ngrok tunnel in background"""
     try:
@@ -381,7 +552,7 @@ async def start_ngrok():
         return None
 
 async def main():
-    """Start WebSocket server"""
+    """Start WebSocket server and HTTP camera server"""
     # Get local IP address
     import socket
     hostname = socket.gethostname()
@@ -390,14 +561,18 @@ async def main():
     except:
         local_ip = "unknown"
     
+    # Start HTTP server for camera
+    await start_http_server()
+    
     # Start ngrok tunnel
     ngrok_url = await start_ngrok()
     
     print("\n" + "=" * 70)
-    print("🚗 RC Car WebSocket Server Starting...")
+    print("🚗 RC Car WebSocket Server + Camera Streaming")
     print("=" * 70)
     print(f"Local Network IP: {local_ip}")
-    print(f"Port: 8765")
+    print(f"WebSocket Port: 8765")
+    print(f"Camera HTTP Port: 8080")
     print("=" * 70)
     print("\n📌 GPIO PIN ASSIGNMENTS:")
     print("=" * 70)
@@ -442,7 +617,18 @@ async def main():
         print("")
         print("   ⚠️  Copy ONLY hostname - no https://, no wss://, no port!")
     print("")
+    print("📹 CAMERA STREAM:")
     print("=" * 70)
+    if CAMERA_AVAILABLE and camera_streamer and camera_streamer.camera:
+        print(f"   ✅ Camera Active")
+        print(f"   Local: http://{local_ip}:8080/?action=stream")
+        print(f"   View in browser: http://{local_ip}:8080/")
+    else:
+        print("   ❌ Camera Not Available")
+        print("   Install: sudo apt install -y python3-picamera2")
+        print("   Enable: sudo raspi-config -> Interface Options -> Camera")
+    print("=" * 70)
+    print("")
     
     if not GPIO_AVAILABLE:
         logger.warning("⚠️  Running in SIMULATION MODE (no GPIO)")
@@ -470,3 +656,5 @@ if __name__ == "__main__":
         logger.info("\n🛑 Server stopped by user")
     finally:
         rc_car.cleanup()
+        if camera_streamer:
+            camera_streamer.cleanup()

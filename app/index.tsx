@@ -273,7 +273,7 @@ export default function RCCarController() {
     return () => {
       disconnectFromServer();
     };
-  }, [piIP]);
+  }, [piIP, isConnected, connectToServer, disconnectFromServer]);
 
   const handleSaveSettings = () => {
     const trimmedIP = tempIP.trim();
@@ -645,7 +645,6 @@ function ThrottleSlider({ value, onChange }: SliderProps) {
       <Text style={styles.sliderLabel}>THROTTLE</Text>
       <GestureDetector gesture={panGesture}>
         <View
-          ref={sliderRef}
           style={[styles.verticalSlider, { height: sliderHeight }]}
           onLayout={(event) => {
             sliderRef.current?.measureInWindow((pageX, pageY) => {
@@ -654,22 +653,22 @@ function ThrottleSlider({ value, onChange }: SliderProps) {
             });
           }}
         >
-        <View style={styles.sliderCenter} />
-        <View
-          pointerEvents="none"
-          style={[
-            styles.sliderThumb,
-            {
-              top:
-                sliderHeight / 2 - (value / 100) * (sliderHeight / 2) - 20,
-            },
-          ]}
-        >
-          <LinearGradient
-            colors={value > 0 ? ["#f59e0b", "#d97706"] : ["#ef4444", "#dc2626"]}
-            style={styles.thumbGradient}
-          />
-        </View>
+          <View style={styles.sliderCenter} />
+          <View
+            pointerEvents="none"
+            style={[
+              styles.sliderThumb,
+              {
+                top:
+                  sliderHeight / 2 - (value / 100) * (sliderHeight / 2) - 20,
+              },
+            ]}
+          >
+            <LinearGradient
+              colors={value > 0 ? ["#f59e0b", "#d97706"] : ["#ef4444", "#dc2626"]}
+              style={styles.thumbGradient}
+            />
+          </View>
         </View>
       </GestureDetector>
       <View style={styles.sliderLabels}>
@@ -717,7 +716,6 @@ function BrakeSlider({ value, onChange }: SliderProps) {
       <Text style={styles.sliderLabel}>BRAKE</Text>
       <GestureDetector gesture={panGesture}>
         <View
-          ref={sliderRef}
           style={[styles.horizontalSlider, { width: sliderWidth }]}
           onLayout={(event) => {
             sliderRef.current?.measureInWindow((pageX, pageY) => {
@@ -726,20 +724,20 @@ function BrakeSlider({ value, onChange }: SliderProps) {
             });
           }}
         >
-        <View
-          pointerEvents="none"
-          style={[
-            styles.sliderThumb,
-            {
-              left: (value / 100) * sliderWidth - 20,
-            },
-          ]}
-        >
-          <LinearGradient
-            colors={["#ef4444", "#dc2626"]}
-            style={styles.thumbGradient}
-          />
-        </View>
+          <View
+            pointerEvents="none"
+            style={[
+              styles.sliderThumb,
+              {
+                left: (value / 100) * sliderWidth - 20,
+              },
+            ]}
+          >
+            <LinearGradient
+              colors={["#ef4444", "#dc2626"]}
+              style={styles.thumbGradient}
+            />
+          </View>
         </View>
       </GestureDetector>
       <View style={styles.sliderLabelsHorizontal}>
@@ -787,7 +785,6 @@ function SteeringSlider({ value, onChange }: SliderProps) {
       <Text style={styles.sliderLabel}>STEERING</Text>
       <GestureDetector gesture={panGesture}>
         <View
-          ref={sliderRef}
           style={[styles.horizontalSlider, { width: sliderWidth }]}
           onLayout={(event) => {
             sliderRef.current?.measureInWindow((pageX, pageY) => {
@@ -796,21 +793,21 @@ function SteeringSlider({ value, onChange }: SliderProps) {
             });
           }}
         >
-        <View style={styles.sliderCenter} />
-        <View
-          pointerEvents="none"
-          style={[
-            styles.sliderThumb,
-            {
-              left: sliderWidth / 2 + (value / 100) * (sliderWidth / 2) - 20,
-            },
-          ]}
-        >
-          <LinearGradient
-            colors={["#f59e0b", "#d97706"]}
-            style={styles.thumbGradient}
-          />
-        </View>
+          <View style={styles.sliderCenter} />
+          <View
+            pointerEvents="none"
+            style={[
+              styles.sliderThumb,
+              {
+                left: sliderWidth / 2 + (value / 100) * (sliderWidth / 2) - 20,
+              },
+            ]}
+          >
+            <LinearGradient
+              colors={["#f59e0b", "#d97706"]}
+              style={styles.thumbGradient}
+            />
+          </View>
         </View>
       </GestureDetector>
       <View style={styles.sliderLabelsHorizontal}>

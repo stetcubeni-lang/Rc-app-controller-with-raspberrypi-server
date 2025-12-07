@@ -25,7 +25,7 @@ export default function RootLayout() {
   return (
     <trpc.Provider client={trpcClient} queryClient={queryClient}>
       <QueryClientProvider client={queryClient}>
-        <GestureHandlerRootView>
+        <GestureHandlerRootView style={{ flex: 1 }}>
           <RootLayoutNav />
         </GestureHandlerRootView>
       </QueryClientProvider>

@@ -608,14 +608,10 @@ interface SliderProps {
 
 function ThrottleSlider({ value, onChange }: SliderProps) {
   const sliderHeight = height * 0.45;
-  const sliderRef = useRef<View>(null);
-  const sliderBounds = useRef({ x: 0, y: 0, width: 60, height: sliderHeight });
-  const startY = useRef(0);
 
   const panGesture = Gesture.Pan()
     .runOnJS(true)
     .onBegin((event) => {
-      startY.current = event.y;
       const y = event.y;
       const percentage = Math.max(
         -100,
@@ -646,12 +642,6 @@ function ThrottleSlider({ value, onChange }: SliderProps) {
       <GestureDetector gesture={panGesture}>
         <View
           style={[styles.verticalSlider, { height: sliderHeight }]}
-          onLayout={(event) => {
-            sliderRef.current?.measureInWindow((pageX, pageY) => {
-              sliderBounds.current = { x: pageX, y: pageY, width: 60, height: sliderHeight };
-              console.log(`[Throttle] Layout bounds:`, sliderBounds.current);
-            });
-          }}
         >
           <View style={styles.sliderCenter} />
           <View
@@ -681,8 +671,6 @@ function ThrottleSlider({ value, onChange }: SliderProps) {
 
 function BrakeSlider({ value, onChange }: SliderProps) {
   const sliderWidth = width * 0.45;
-  const sliderRef = useRef<View>(null);
-  const sliderBounds = useRef({ x: 0, y: 0, width: sliderWidth, height: 60 });
 
   const panGesture = Gesture.Pan()
     .runOnJS(true)
@@ -717,12 +705,6 @@ function BrakeSlider({ value, onChange }: SliderProps) {
       <GestureDetector gesture={panGesture}>
         <View
           style={[styles.horizontalSlider, { width: sliderWidth }]}
-          onLayout={(event) => {
-            sliderRef.current?.measureInWindow((pageX, pageY) => {
-              sliderBounds.current = { x: pageX, y: pageY, width: sliderWidth, height: 60 };
-              console.log(`[Brake] Layout bounds:`, sliderBounds.current);
-            });
-          }}
         >
           <View
             pointerEvents="none"
@@ -750,8 +732,6 @@ function BrakeSlider({ value, onChange }: SliderProps) {
 
 function SteeringSlider({ value, onChange }: SliderProps) {
   const sliderWidth = width * 0.45;
-  const sliderRef = useRef<View>(null);
-  const sliderBounds = useRef({ x: 0, y: 0, width: sliderWidth, height: 60 });
 
   const panGesture = Gesture.Pan()
     .runOnJS(true)
@@ -786,12 +766,6 @@ function SteeringSlider({ value, onChange }: SliderProps) {
       <GestureDetector gesture={panGesture}>
         <View
           style={[styles.horizontalSlider, { width: sliderWidth }]}
-          onLayout={(event) => {
-            sliderRef.current?.measureInWindow((pageX, pageY) => {
-              sliderBounds.current = { x: pageX, y: pageY, width: sliderWidth, height: 60 };
-              console.log(`[Steering] Layout bounds:`, sliderBounds.current);
-            });
-          }}
         >
           <View style={styles.sliderCenter} />
           <View

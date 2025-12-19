@@ -273,7 +273,7 @@ export default function RCCarController() {
     return () => {
       disconnectFromServer();
     };
-  }, [piIP, isConnected, connectToServer, disconnectFromServer]);
+  }, [piIP]);
 
   const handleSaveSettings = () => {
     const trimmedIP = tempIP.trim();
@@ -608,10 +608,14 @@ interface SliderProps {
 
 function ThrottleSlider({ value, onChange }: SliderProps) {
   const sliderHeight = height * 0.45;
+  const sliderRef = useRef<View>(null);
+  const sliderBounds = useRef({ x: 0, y: 0, width: 60, height: sliderHeight });
+  const startY = useRef(0);
 
   const panGesture = Gesture.Pan()
     .runOnJS(true)
     .onBegin((event) => {
+      startY.current = event.y;
       const y = event.y;
       const percentage = Math.max(
         -100,
@@ -641,24 +645,31 @@ function ThrottleSlider({ value, onChange }: SliderProps) {
       <Text style={styles.sliderLabel}>THROTTLE</Text>
       <GestureDetector gesture={panGesture}>
         <View
+          ref={sliderRef}
           style={[styles.verticalSlider, { height: sliderHeight }]}
+          onLayout={(event) => {
+            sliderRef.current?.measureInWindow((pageX, pageY) => {
+              sliderBounds.current = { x: pageX, y: pageY, width: 60, height: sliderHeight };
+              console.log(`[Throttle] Layout bounds:`, sliderBounds.current);
+            });
+          }}
         >
-          <View style={styles.sliderCenter} />
-          <View
-            pointerEvents="none"
-            style={[
-              styles.sliderThumb,
-              {
-                top:
-                  sliderHeight / 2 - (value / 100) * (sliderHeight / 2) - 20,
-              },
-            ]}
-          >
-            <LinearGradient
-              colors={value > 0 ? ["#f59e0b", "#d97706"] : ["#ef4444", "#dc2626"]}
-              style={styles.thumbGradient}
-            />
-          </View>
+        <View style={styles.sliderCenter} />
+        <View
+          pointerEvents="none"
+          style={[
+            styles.sliderThumb,
+            {
+              top:
+                sliderHeight / 2 - (value / 100) * (sliderHeight / 2) - 20,
+            },
+          ]}
+        >
+          <LinearGradient
+            colors={value > 0 ? ["#f59e0b", "#d97706"] : ["#ef4444", "#dc2626"]}
+            style={styles.thumbGradient}
+          />
+        </View>
         </View>
       </GestureDetector>
       <View style={styles.sliderLabels}>
@@ -671,6 +682,8 @@ function ThrottleSlider({ value, onChange }: SliderProps) {
 
 function BrakeSlider({ value, onChange }: SliderProps) {
   const sliderWidth = width * 0.45;
+  const sliderRef = useRef<View>(null);
+  const sliderBounds = useRef({ x: 0, y: 0, width: sliderWidth, height: 60 });
 
   const panGesture = Gesture.Pan()
     .runOnJS(true)
@@ -704,22 +717,29 @@ function BrakeSlider({ value, onChange }: SliderProps) {
       <Text style={styles.sliderLabel}>BRAKE</Text>
       <GestureDetector gesture={panGesture}>
         <View
+          ref={sliderRef}
           style={[styles.horizontalSlider, { width: sliderWidth }]}
+          onLayout={(event) => {
+            sliderRef.current?.measureInWindow((pageX, pageY) => {
+              sliderBounds.current = { x: pageX, y: pageY, width: sliderWidth, height: 60 };
+              console.log(`[Brake] Layout bounds:`, sliderBounds.current);
+            });
+          }}
         >
-          <View
-            pointerEvents="none"
-            style={[
-              styles.sliderThumb,
-              {
-                left: (value / 100) * sliderWidth - 20,
-              },
-            ]}
-          >
-            <LinearGradient
-              colors={["#ef4444", "#dc2626"]}
-              style={styles.thumbGradient}
-            />
-          </View>
+        <View
+          pointerEvents="none"
+          style={[
+            styles.sliderThumb,
+            {
+              left: (value / 100) * sliderWidth - 20,
+            },
+          ]}
+        >
+          <LinearGradient
+            colors={["#ef4444", "#dc2626"]}
+            style={styles.thumbGradient}
+          />
+        </View>
         </View>
       </GestureDetector>
       <View style={styles.sliderLabelsHorizontal}>
@@ -732,6 +752,8 @@ function BrakeSlider({ value, onChange }: SliderProps) {
 
 function SteeringSlider({ value, onChange }: SliderProps) {
   const sliderWidth = width * 0.45;
+  const sliderRef = useRef<View>(null);
+  const sliderBounds = useRef({ x: 0, y: 0, width: sliderWidth, height: 60 });
 
   const panGesture = Gesture.Pan()
     .runOnJS(true)
@@ -765,23 +787,30 @@ function SteeringSlider({ value, onChange }: SliderProps) {
       <Text style={styles.sliderLabel}>STEERING</Text>
       <GestureDetector gesture={panGesture}>
         <View
+          ref={sliderRef}
           style={[styles.horizontalSlider, { width: sliderWidth }]}
+          onLayout={(event) => {
+            sliderRef.current?.measureInWindow((pageX, pageY) => {
+              sliderBounds.current = { x: pageX, y: pageY, width: sliderWidth, height: 60 };
+              console.log(`[Steering] Layout bounds:`, sliderBounds.current);
+            });
+          }}
         >
-          <View style={styles.sliderCenter} />
-          <View
-            pointerEvents="none"
-            style={[
-              styles.sliderThumb,
-              {
-                left: sliderWidth / 2 + (value / 100) * (sliderWidth / 2) - 20,
-              },
-            ]}
-          >
-            <LinearGradient
-              colors={["#f59e0b", "#d97706"]}
-              style={styles.thumbGradient}
-            />
-          </View>
+        <View style={styles.sliderCenter} />
+        <View
+          pointerEvents="none"
+          style={[
+            styles.sliderThumb,
+            {
+              left: sliderWidth / 2 + (value / 100) * (sliderWidth / 2) - 20,
+            },
+          ]}
+        >
+          <LinearGradient
+            colors={["#f59e0b", "#d97706"]}
+            style={styles.thumbGradient}
+          />
+        </View>
         </View>
       </GestureDetector>
       <View style={styles.sliderLabelsHorizontal}>

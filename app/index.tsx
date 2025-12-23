@@ -57,10 +57,12 @@ export default function RCCarController() {
   useEffect(() => {
     if (!piIP) {
       setShowSettings(true);
+      setIsNgrokConnection(false);
     } else {
       const cleanIP = piIP.trim().replace(/^(https?:\/\/)/i, '').replace(/^(wss?:\/\/)/i, '').replace(/\/+$/, '');
-      const isNgrok = cleanIP.includes('.ngrok-free.dev') || cleanIP.includes('.ngrok-free.app') || cleanIP.includes('.ngrok.');
+      const isNgrok = cleanIP.includes('.ngrok-free.dev') || cleanIP.includes('.ngrok-free.app') || cleanIP.includes('.ngrok.') || cleanIP.includes('ngrok.io');
       setIsNgrokConnection(isNgrok);
+      console.log(`🔍 Connection type: ${isNgrok ? 'ngrok (remote)' : 'local network'}`);
     }
   }, [piIP]);
 
@@ -871,7 +873,10 @@ function DraggableResizableCamera({
   const [isResizing, setIsResizing] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
   
-  const cameraUrl = `http://${piIP.replace(/^(https?:\/\/)/i, '').replace(/^(wss?:\/\/)/i, '').replace(/\/+$/, '')}:8080/?action=stream`;
+  const cleanIP = piIP.replace(/^(https?:\/\/)/i, '').replace(/^(wss?:\/\/)/i, '').replace(/\/+$/, '');
+  const cameraUrl = `http://${cleanIP.replace(/:\d+$/, '')}:8080/?action=stream`;
+  
+  console.log(`📹 Camera URL: ${cameraUrl}`);
 
   const dragPanResponder = useRef(
     PanResponder.create({

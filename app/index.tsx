@@ -59,7 +59,7 @@ export default function RCCarController() {
       setShowSettings(true);
     } else {
       const cleanIP = piIP.trim().replace(/^(https?:\/\/)/i, '').replace(/^(wss?:\/\/)/i, '').replace(/\/+$/, '');
-      const isNgrok = cleanIP.includes('.ngrok') || cleanIP.includes('ngrok-free');
+      const isNgrok = cleanIP.includes('.ngrok-free.dev') || cleanIP.includes('.ngrok-free.app') || cleanIP.includes('.ngrok.');
       setIsNgrokConnection(isNgrok);
     }
   }, [piIP]);
@@ -153,7 +153,7 @@ export default function RCCarController() {
       
       let url: string;
       
-      if (cleanIP.includes('.ngrok') || cleanIP.includes('ngrok-free')) {
+      if (cleanIP.includes('.ngrok-free.dev') || cleanIP.includes('.ngrok-free.app') || cleanIP.includes('.ngrok.')) {
         cleanIP = cleanIP.replace(/:\d+$/, '');
         url = `wss://${cleanIP}`;
         console.log(`🔒 Detected ngrok URL, using secure WSS: ${url}`);
@@ -391,7 +391,7 @@ export default function RCCarController() {
                 <Text style={styles.errorHint}>
                   Trying: {(() => {
                     let cleanIP = piIP.trim().replace(/^(https?:\/\/)/i, '').replace(/^(wss?:\/\/)/i, '').replace(/\/+$/, '');
-                    if (cleanIP.includes('.ngrok') || cleanIP.includes('ngrok-free')) {
+                    if (cleanIP.includes('.ngrok-free.dev') || cleanIP.includes('.ngrok-free.app') || cleanIP.includes('.ngrok.')) {
                       const host = cleanIP.replace(/:\d+$/, '');
                       return `wss://${host}`;
                     } else if (!cleanIP.includes(':')) {

@@ -131,16 +131,6 @@ class CameraStreamer:
         """Initialize camera for Raspberry Pi Camera Module 3"""
         try:
             logger.info("Initializing Raspberry Pi Camera Module 3...")
-            
-            # Kill any existing camera processes
-            try:
-                subprocess.run(['pkill', '-f', 'libcamera'], stderr=subprocess.DEVNULL, timeout=2)
-                subprocess.run(['pkill', '-f', 'rpicam'], stderr=subprocess.DEVNULL, timeout=2)
-                time.sleep(1)
-                logger.info("Stopped any existing camera processes")
-            except:
-                pass
-            
             self.camera = Picamera2()
             
             # Configure camera for streaming with MJPEG

@@ -878,7 +878,7 @@ function DraggableResizableCamera({
   const cleanIP = piIP.replace(/^(https?:\/\/)/i, '').replace(/^(wss?:\/\/)/i, '').replace(/\/+$/, '');
   const isNgrok = cleanIP.includes('.ngrok-free.dev') || cleanIP.includes('.ngrok-free.app') || cleanIP.includes('.ngrok.') || cleanIP.includes('ngrok.io');
   const cameraUrl = isNgrok 
-    ? `https://${cleanIP.replace(/:\d+$/, '')}/camera/stream`
+    ? `https://${cleanIP.replace(/:\d+$/, '')}/?action=stream`
     : `http://${cleanIP.replace(/:\d+$/, '')}:8080/?action=stream`;
   
   console.log(`📹 Camera URL: ${cameraUrl}`);
@@ -994,20 +994,27 @@ function DraggableResizableCamera({
           position: 'absolute' as const,
         },
       ]}
-      {...dragPanResponder.panHandlers}
     >
       <View style={styles.cameraContainer}>
-        <View style={styles.cameraHeader}>
+        <View style={styles.cameraHeader} {...dragPanResponder.panHandlers}>
           <View style={styles.cameraHeaderLeft}>
             <Video size={18} color="#f59e0b" />
           </View>
-          <View style={styles.cameraHeaderRight}>
-            <Pressable onPress={handleFullscreen} style={styles.fullscreenButton}>
+          <View style={styles.cameraHeaderRight} pointerEvents="box-none">
+            <Pressable 
+              onPress={handleFullscreen} 
+              style={styles.fullscreenButton}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
               <Maximize2 size={16} color="#f59e0b" />
             </Pressable>
-            <View {...resizePanResponder.panHandlers} style={styles.resizeHandle}>
+            <Pressable 
+              {...resizePanResponder.panHandlers} 
+              style={styles.resizeHandle}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
               <View style={styles.resizeIcon} />
-            </View>
+            </Pressable>
           </View>
         </View>
         <View style={[styles.cameraView, { width: size.width, height: size.height }]}>
@@ -1031,7 +1038,7 @@ function DraggableResizableCamera({
               const { nativeEvent } = syntheticEvent;
               console.error('❌ Camera HTTP error:', nativeEvent.statusCode, nativeEvent.url);
             }}
-            javaScriptEnabled={false}
+            javaScriptEnabled={true}
             domStorageEnabled={false}
             startInLoadingState={false}
             scrollEnabled={false}
@@ -1041,6 +1048,7 @@ function DraggableResizableCamera({
             showsVerticalScrollIndicator={false}
             mediaPlaybackRequiresUserAction={false}
             allowsInlineMediaPlayback={true}
+            mixedContentMode="always"
           />
         </View>
       </View>
@@ -1390,7 +1398,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    borderRadius: 8,
+    marginBottom: 4,
   },
   cameraHeaderLeft: {
     flexDirection: "row",
@@ -1400,7 +1412,7 @@ const styles = StyleSheet.create({
   cameraHeaderRight: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: 12,
   },
   cameraLabel: {
     color: "#f59e0b",
@@ -1409,9 +1421,10 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
   },
   fullscreenButton: {
-    padding: 4,
-    backgroundColor: "rgba(245, 158, 11, 0.3)",
+    padding: 6,
+    backgroundColor: "rgba(245, 158, 11, 0.5)",
     borderRadius: 6,
+    zIndex: 200,
   },
   cameraView: {
     backgroundColor: "rgba(0, 0, 0, 0.5)",
@@ -1459,8 +1472,9 @@ const styles = StyleSheet.create({
   },
   resizeHandle: {
     padding: 6,
-    backgroundColor: "rgba(245, 158, 11, 0.3)",
+    backgroundColor: "rgba(245, 158, 11, 0.5)",
     borderRadius: 6,
+    zIndex: 200,
   },
   resizeIcon: {
     width: 12,

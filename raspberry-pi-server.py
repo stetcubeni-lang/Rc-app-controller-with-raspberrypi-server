@@ -515,11 +515,6 @@ async def stream_handler(request):
 
 async def root_handler(request):
     """Root handler - info page"""
-    action = request.query.get('action', '')
-    
-    if action == 'stream':
-        return await stream_handler(request)
-    
     camera_status = "✅ Active (Pi Camera Module 3)" if (camera_streamer and camera_streamer.camera_process) else "❌ Not Available"
     
     html = """
@@ -566,10 +561,10 @@ async def root_handler(request):
         <h1>🎥 RC Car Camera Stream</h1>
         <div class="status">Camera Status: """ + camera_status + """</div>
         """ + ("""
-        <img src="/?action=stream" alt="Pi Camera Module 3 Stream" />
+        <img src="/camera" alt="Pi Camera Module 3 Stream" />
         <div class="info">
             <p><strong>Stream URL for Mobile App:</strong></p>
-            <p><code>http://YOUR_PI_IP:8080/?action=stream</code></p>
+            <p><code>http://YOUR_PI_IP:8765/camera</code></p>
             <p><strong>Resolution:</strong> 640x480 @ 30fps</p>
             <p><strong>Encoder:</strong> MJPEG (libcamera-vid)</p>
         </div>
@@ -591,17 +586,18 @@ async def root_handler(request):
     return web.Response(text=html, content_type='text/html')
 
 async def start_http_server():
-    """Start HTTP server for camera streaming on port 8080"""
+    """Start HTTP server for camera streaming on port 8765 (same as WebSocket)"""
     app = web.Application()
-    app.router.add_get('/', root_handler)
+    app.router.add_get('/camera', stream_handler)
+    app.router.add_get('/camera-info', root_handler)
     
     runner = web.AppRunner(app)
     await runner.setup()
     
-    site = web.TCPSite(runner, '0.0.0.0', 8080)
+    site = web.TCPSite(runner, '0.0.0.0', 8765, reuse_address=True, reuse_port=True)
     await site.start()
     
-    logger.info("📹 HTTP Camera Server started on port 8080")
+    logger.info("📹 HTTP Camera Server started on port 8765 (combined with WebSocket)")
 
 async def start_ngrok():
     """Start ngrok tunnel in background"""
@@ -616,9 +612,9 @@ async def start_ngrok():
         subprocess.run(['pkill', '-f', 'ngrok'], stderr=subprocess.DEVNULL)
         time.sleep(1)
         
-        # Start ngrok in background
+        # Start ngrok in background for port 8765 (handles both WebSocket and HTTP camera)
         ngrok_process = subprocess.Popen(
-            ['ngrok', 'http', '8765', '--host-header=rewrite'],
+            ['ngrok', 'http', '8765', '--host-header=rewrite', '--request-header-add=ngrok-skip-browser-warning:true'],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True
@@ -666,8 +662,7 @@ async def main():
     print("🚗 RC Car WebSocket Server + Camera Streaming")
     print("=" * 70)
     print(f"Local Network IP: {local_ip}")
-    print(f"WebSocket Port: 8765")
-    print(f"Camera HTTP Port: 8080")
+    print(f"WebSocket + HTTP Camera Port: 8765 (combined)")
     print("=" * 70)
     print("\n📌 GPIO PIN ASSIGNMENTS:")
     print("=" * 70)
@@ -701,7 +696,7 @@ async def main():
         print("")
         print("   ⚠️  Copy ONLY hostname - no https://, no wss://, no port!")
         print("   ⚠️  WebSocket upgrade happens automatically")
-        print("   ⚠️  Camera NOT available via ngrok (use local network for camera)")
+        print("   ✅  Camera ALSO works via ngrok (combined port)")
     else:
         print("   ❌ ngrok not started automatically")
         print("   Manual setup:")
@@ -717,9 +712,9 @@ async def main():
     print("=" * 70)
     if CAMERA_AVAILABLE and camera_streamer and camera_streamer.camera_process:
         print(f"   ✅ Camera Active (libcamera-vid)")
-        print(f"   Local: http://{local_ip}:8080/?action=stream")
-        print(f"   View in browser: http://{local_ip}:8080/")
-        print("   ⚠️  Camera only works on local network (not via ngrok)")
+        print(f"   Local: http://{local_ip}:8765/camera")
+        print(f"   View in browser: http://{local_ip}:8765/camera-info")
+        print("   ✅  Camera works on BOTH local network AND ngrok")
     else:
         print("   ❌ Camera Not Available")
         print("   Install: sudo apt install -y libcamera-apps")

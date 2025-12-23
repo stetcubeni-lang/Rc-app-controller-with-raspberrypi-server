@@ -483,7 +483,7 @@ export default function RCCarController() {
                 <Text style={styles.helpText}>4. Copy ONLY hostname from Forwarding line</Text>
                 <Text style={styles.helpText}>Example: abc123.ngrok-free.app</Text>
                 <Text style={[styles.helpText, { color: '#ef4444', fontWeight: '700' as const, marginTop: 4 }]}>⚠️ No https://, no ws://, no port!</Text>
-                <Text style={[styles.helpText, { color: '#ef4444', fontWeight: '700' as const }]}>⚠️ Camera unavailable with ngrok (controls only)</Text>
+                <Text style={[styles.helpText, { color: '#10b981', fontWeight: '700' as const }]}>✅ Camera works with ngrok too!</Text>
               </View>
 
               <View style={styles.modalButtons}>
@@ -879,7 +879,16 @@ function DraggableResizableCamera({
   const cleanIP = piIP.replace(/^(https?:\/\/)/i, '').replace(/^(wss?:\/\/)/i, '').replace(/\/+$/, '');
   
   const isNgrok = cleanIP.includes('.ngrok-free.dev') || cleanIP.includes('.ngrok-free.app') || cleanIP.includes('.ngrok.');
-  const cameraUrl = `http://${cleanIP.replace(/:\d+$/, '')}:8080/?action=stream`;
+  
+  let cameraUrl: string;
+  if (isNgrok) {
+    const host = cleanIP.replace(/:\d+$/, '');
+    cameraUrl = `https://${host}/camera`;
+  } else if (cleanIP.includes(':')) {
+    cameraUrl = `http://${cleanIP}/camera`;
+  } else {
+    cameraUrl = `http://${cleanIP}:8765/camera`;
+  }
   
   console.log(`📹 Camera URL: ${cameraUrl}`);
   
@@ -945,13 +954,7 @@ function DraggableResizableCamera({
     return (
       <View style={styles.fullscreenContainer}>
         <View style={styles.fullscreenCameraView}>
-          {isNgrok ? (
-            <View style={styles.cameraErrorView}>
-              <Text style={styles.cameraErrorText}>Camera Not Available via ngrok</Text>
-              <Text style={styles.cameraErrorHint}>Camera only works on local network</Text>
-              <Text style={styles.cameraErrorHint}>Use local IP for camera streaming</Text>
-            </View>
-          ) : Platform.OS === 'web' ? (
+          {Platform.OS === 'web' ? (
             <Image
               key={cameraKey}
               source={{ uri: cameraUrl }}
@@ -970,7 +973,12 @@ function DraggableResizableCamera({
             <WebView
               key={cameraKey}
               ref={webViewRef}
-              source={{ uri: cameraUrl }}
+              source={{ 
+                uri: cameraUrl,
+                headers: {
+                  'ngrok-skip-browser-warning': 'true',
+                }
+              }}
               style={styles.cameraWebView}
               onLoad={() => {
                 console.log('✅ Camera WebView loaded');
@@ -1041,13 +1049,7 @@ function DraggableResizableCamera({
           </View>
         </View>
         <View style={[styles.cameraView, { width: size.width, height: size.height }]}>
-          {isNgrok ? (
-            <View style={styles.cameraErrorView}>
-              <Text style={styles.cameraErrorText}>Camera Not Available</Text>
-              <Text style={styles.cameraErrorHint}>Camera only works on local network</Text>
-              <Text style={styles.cameraErrorHint}>Switch to local IP in settings</Text>
-            </View>
-          ) : Platform.OS === 'web' ? (
+          {Platform.OS === 'web' ? (
             <Image
               key={cameraKey}
               source={{ uri: cameraUrl }}
@@ -1066,7 +1068,12 @@ function DraggableResizableCamera({
             <WebView
               key={cameraKey}
               ref={webViewRef}
-              source={{ uri: cameraUrl }}
+              source={{ 
+                uri: cameraUrl,
+                headers: {
+                  'ngrok-skip-browser-warning': 'true',
+                }
+              }}
               style={styles.cameraWebView}
               pointerEvents="none"
               onLoad={() => {

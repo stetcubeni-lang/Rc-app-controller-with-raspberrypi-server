@@ -881,6 +881,11 @@ function DraggableResizableCamera({
     ? `https://${cleanIP.replace(/:\d+$/, '')}/?action=stream`
     : `http://${cleanIP.replace(/:\d+$/, '')}:8080/?action=stream`;
   
+  const webViewHeaders = isNgrok ? {
+    'ngrok-skip-browser-warning': 'true',
+    'User-Agent': 'RCCarApp'
+  } : undefined;
+  
   console.log(`📹 Camera URL: ${cameraUrl}`);
   
   useEffect(() => {
@@ -946,7 +951,10 @@ function DraggableResizableCamera({
           <WebView
             key={cameraKey}
             ref={webViewRef}
-            source={{ uri: cameraUrl }}
+            source={{ 
+              uri: cameraUrl,
+              headers: webViewHeaders
+            }}
             style={styles.cameraWebView}
             onLoad={() => {
               console.log('✅ Camera WebView loaded');
@@ -996,11 +1004,11 @@ function DraggableResizableCamera({
       ]}
     >
       <View style={styles.cameraContainer}>
-        <View style={styles.cameraHeader} {...dragPanResponder.panHandlers}>
-          <View style={styles.cameraHeaderLeft}>
+        <View style={styles.cameraHeader}>
+          <View style={styles.cameraHeaderLeft} {...dragPanResponder.panHandlers}>
             <Video size={18} color="#f59e0b" />
           </View>
-          <View style={styles.cameraHeaderRight} pointerEvents="box-none">
+          <View style={styles.cameraHeaderRight}>
             <Pressable 
               onPress={handleFullscreen} 
               style={styles.fullscreenButton}
@@ -1008,20 +1016,22 @@ function DraggableResizableCamera({
             >
               <Maximize2 size={16} color="#f59e0b" />
             </Pressable>
-            <Pressable 
+            <View 
               {...resizePanResponder.panHandlers} 
               style={styles.resizeHandle}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             >
               <View style={styles.resizeIcon} />
-            </Pressable>
+            </View>
           </View>
         </View>
         <View style={[styles.cameraView, { width: size.width, height: size.height }]}>
           <WebView
             key={cameraKey}
             ref={webViewRef}
-            source={{ uri: cameraUrl }}
+            source={{ 
+              uri: cameraUrl,
+              headers: webViewHeaders
+            }}
             style={styles.cameraWebView}
             onLoad={() => {
               console.log('✅ Camera WebView loaded');
@@ -1408,6 +1418,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+    flex: 1,
   },
   cameraHeaderRight: {
     flexDirection: "row",
@@ -1421,10 +1432,9 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
   },
   fullscreenButton: {
-    padding: 6,
-    backgroundColor: "rgba(245, 158, 11, 0.5)",
+    padding: 8,
+    backgroundColor: "rgba(245, 158, 11, 0.8)",
     borderRadius: 6,
-    zIndex: 200,
   },
   cameraView: {
     backgroundColor: "rgba(0, 0, 0, 0.5)",
@@ -1471,10 +1481,9 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   resizeHandle: {
-    padding: 6,
-    backgroundColor: "rgba(245, 158, 11, 0.5)",
+    padding: 8,
+    backgroundColor: "rgba(245, 158, 11, 0.8)",
     borderRadius: 6,
-    zIndex: 200,
   },
   resizeIcon: {
     width: 12,

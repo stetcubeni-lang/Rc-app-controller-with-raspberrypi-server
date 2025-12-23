@@ -591,7 +591,7 @@ async def root_handler(request):
     return web.Response(text=html, content_type='text/html')
 
 async def start_http_server():
-    """Start HTTP server for camera streaming"""
+    """Start HTTP server for camera streaming on port 8080"""
     app = web.Application()
     app.router.add_get('/', root_handler)
     
@@ -701,6 +701,7 @@ async def main():
         print("")
         print("   ⚠️  Copy ONLY hostname - no https://, no wss://, no port!")
         print("   ⚠️  WebSocket upgrade happens automatically")
+        print("   ⚠️  Camera NOT available via ngrok (use local network for camera)")
     else:
         print("   ❌ ngrok not started automatically")
         print("   Manual setup:")
@@ -718,6 +719,7 @@ async def main():
         print(f"   ✅ Camera Active (libcamera-vid)")
         print(f"   Local: http://{local_ip}:8080/?action=stream")
         print(f"   View in browser: http://{local_ip}:8080/")
+        print("   ⚠️  Camera only works on local network (not via ngrok)")
     else:
         print("   ❌ Camera Not Available")
         print("   Install: sudo apt install -y libcamera-apps")

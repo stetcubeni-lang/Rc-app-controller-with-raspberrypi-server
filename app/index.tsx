@@ -884,7 +884,10 @@ function DraggableResizableCamera({
   const webViewRef = useRef<WebView>(null);
   
   const cleanIP = piIP.replace(/^(https?:\/\/)/i, '').replace(/^(wss?:\/\/)/i, '').replace(/\/+$/, '');
-  const cameraUrl = `http://${cleanIP.replace(/:\d+$/, '')}:8080/?action=stream`;
+  const isNgrok = cleanIP.includes('.ngrok-free.dev') || cleanIP.includes('.ngrok-free.app') || cleanIP.includes('.ngrok.') || cleanIP.includes('ngrok.io');
+  const cameraUrl = isNgrok 
+    ? `https://${cleanIP.replace(/:\d+$/, '')}/camera/stream`
+    : `http://${cleanIP.replace(/:\d+$/, '')}:8080/?action=stream`;
   
   console.log(`📹 Camera URL: ${cameraUrl}`);
   
@@ -1002,8 +1005,7 @@ function DraggableResizableCamera({
               />
               {!streamLoaded && (
                 <View style={styles.cameraLoading}>
-                  <Text style={styles.cameraLoadingText}>Loading camera stream...</Text>
-                  <Text style={[styles.cameraLoadingText, { fontSize: 11, marginTop: 4, opacity: 0.7 }]}>{cameraUrl}</Text>
+                  <Text style={styles.cameraLoadingText}>Loading camera...</Text>
                 </View>
               )}
             </>

@@ -877,16 +877,11 @@ function DraggableResizableCamera({
   
   const cleanIP = piIP.replace(/^(https?:\/\/)/i, '').replace(/^(wss?:\/\/)/i, '').replace(/\/+$/, '');
   const isNgrok = cleanIP.includes('.ngrok-free.dev') || cleanIP.includes('.ngrok-free.app') || cleanIP.includes('.ngrok.') || cleanIP.includes('ngrok.io');
-  const cameraUrl = isNgrok 
-    ? `https://${cleanIP.replace(/:\d+$/, '')}/?action=stream`
-    : `http://${cleanIP.replace(/:\d+$/, '')}:8080/?action=stream`;
   
-  const webViewHeaders = isNgrok ? {
-    'ngrok-skip-browser-warning': 'true',
-    'User-Agent': 'RCCarApp'
-  } : undefined;
+  const cameraUrl = `http://${cleanIP.replace(/:\d+$/, '')}:8080/?action=stream`;
   
   console.log(`📹 Camera URL: ${cameraUrl}`);
+  console.log(`📹 Is ngrok: ${isNgrok}`);
   
   useEffect(() => {
     onCameraError(false);
@@ -944,6 +939,37 @@ function DraggableResizableCamera({
     onFullscreenChange(!isFullscreen);
   };
 
+  if (isNgrok) {
+    return (
+      <Animated.View
+        style={[
+          styles.draggableCamera,
+          {
+            left: pan.x,
+            top: pan.y,
+            position: 'absolute' as const,
+          },
+        ]}
+      >
+        <View style={styles.cameraContainer}>
+          <View style={styles.cameraHeader}>
+            <View style={styles.cameraHeaderLeft} {...dragPanResponder.panHandlers}>
+              <Video size={18} color="#f59e0b" />
+            </View>
+          </View>
+          <View style={[styles.cameraView, { width: size.width, height: size.height }]}>
+            <View style={styles.cameraUnavailableView}>
+              <Text style={styles.cameraUnavailableText}>📹</Text>
+              <Text style={styles.cameraUnavailableTitle}>Camera Unavailable</Text>
+              <Text style={styles.cameraUnavailableHint}>Camera only works on local network</Text>
+              <Text style={styles.cameraUnavailableHint}>Use local IP for camera access</Text>
+            </View>
+          </View>
+        </View>
+      </Animated.View>
+    );
+  }
+
   if (isFullscreen) {
     return (
       <View style={styles.fullscreenContainer}>
@@ -951,10 +977,7 @@ function DraggableResizableCamera({
           <WebView
             key={cameraKey}
             ref={webViewRef}
-            source={{ 
-              uri: cameraUrl,
-              headers: webViewHeaders
-            }}
+            source={{ uri: cameraUrl }}
             style={styles.cameraWebView}
             onLoad={() => {
               console.log('✅ Camera WebView loaded');
@@ -983,9 +1006,14 @@ function DraggableResizableCamera({
             showsVerticalScrollIndicator={false}
             mediaPlaybackRequiresUserAction={false}
             allowsInlineMediaPlayback={true}
+            mixedContentMode="always"
           />
         </View>
-        <Pressable onPress={handleFullscreen} style={styles.exitFullscreenButton}>
+        <Pressable 
+          onPress={handleFullscreen} 
+          style={styles.exitFullscreenButton}
+          hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
+        >
           <Maximize2 size={24} color="#ffffff" />
         </Pressable>
       </View>
@@ -1012,26 +1040,25 @@ function DraggableResizableCamera({
             <Pressable 
               onPress={handleFullscreen} 
               style={styles.fullscreenButton}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
             >
-              <Maximize2 size={16} color="#f59e0b" />
+              <Maximize2 size={16} color="#1a1410" />
             </Pressable>
-            <View 
-              {...resizePanResponder.panHandlers} 
+            <Pressable
+              onPressIn={() => setIsResizing(true)}
+              {...resizePanResponder.panHandlers}
               style={styles.resizeHandle}
+              hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
             >
               <View style={styles.resizeIcon} />
-            </View>
+            </Pressable>
           </View>
         </View>
         <View style={[styles.cameraView, { width: size.width, height: size.height }]}>
           <WebView
             key={cameraKey}
             ref={webViewRef}
-            source={{ 
-              uri: cameraUrl,
-              headers: webViewHeaders
-            }}
+            source={{ uri: cameraUrl }}
             style={styles.cameraWebView}
             onLoad={() => {
               console.log('✅ Camera WebView loaded');
@@ -1048,7 +1075,7 @@ function DraggableResizableCamera({
               const { nativeEvent } = syntheticEvent;
               console.error('❌ Camera HTTP error:', nativeEvent.statusCode, nativeEvent.url);
             }}
-            javaScriptEnabled={true}
+            javaScriptEnabled={false}
             domStorageEnabled={false}
             startInLoadingState={false}
             scrollEnabled={false}
@@ -1560,5 +1587,30 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 2,
     borderColor: "#f59e0b",
+    zIndex: 1001,
+  },
+  cameraUnavailableView: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+    backgroundColor: "rgba(0, 0, 0, 0.8)",
+  },
+  cameraUnavailableText: {
+    fontSize: 40,
+    marginBottom: 12,
+  },
+  cameraUnavailableTitle: {
+    color: "#f59e0b",
+    fontSize: 14,
+    fontWeight: "700" as const,
+    marginBottom: 8,
+    textAlign: "center" as const,
+  },
+  cameraUnavailableHint: {
+    color: "#d97706",
+    fontSize: 11,
+    marginBottom: 2,
+    textAlign: "center" as const,
   },
 });

@@ -44,7 +44,7 @@ export default function RCCarController() {
   const [hasLoadedCameraSettings, setHasLoadedCameraSettings] = useState(false);
   const [cameraError, setCameraError] = useState(false);
   const [cameraKey, setCameraKey] = useState(0);
-  const [isNgrokConnection, setIsNgrokConnection] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -57,12 +57,6 @@ export default function RCCarController() {
   useEffect(() => {
     if (!piIP) {
       setShowSettings(true);
-      setIsNgrokConnection(false);
-    } else {
-      const cleanIP = piIP.trim().replace(/^(https?:\/\/)/i, '').replace(/^(wss?:\/\/)/i, '').replace(/\/+$/, '');
-      const isNgrok = cleanIP.includes('.ngrok-free.dev') || cleanIP.includes('.ngrok-free.app') || cleanIP.includes('.ngrok.') || cleanIP.includes('ngrok.io');
-      setIsNgrokConnection(isNgrok);
-      console.log(`🔍 Connection type: ${isNgrok ? 'ngrok (remote)' : 'local network'}`);
     }
   }, [piIP]);
 
@@ -440,14 +434,7 @@ export default function RCCarController() {
                 )}
               </View>
             )}
-            {isConnected && isNgrokConnection && (
-              <View style={[styles.errorContainer, { borderColor: 'rgba(251, 191, 36, 0.4)', backgroundColor: 'rgba(251, 191, 36, 0.1)' }]}>
-                <Text style={[styles.errorText, { color: '#fbbf24' }]}>⚠️ Camera not available via ngrok</Text>
-                <Text style={[styles.errorHint, { color: '#d97706' }]}>
-                  Camera needs direct connection. Use same WiFi or setup second ngrok tunnel for port 8080.
-                </Text>
-              </View>
-            )}
+
           </View>
         </View>
 
@@ -603,7 +590,7 @@ export default function RCCarController() {
           </View>
         </View>
 
-        {hasLoadedCameraSettings && piIP && !isNgrokConnection && (
+        {hasLoadedCameraSettings && piIP && (
           <DraggableResizableCamera 
               piIP={piIP}
               position={cameraPosition}
@@ -620,6 +607,8 @@ export default function RCCarController() {
               onCameraError={setCameraError}
               cameraKey={cameraKey}
               onRefresh={() => setCameraKey(prev => prev + 1)}
+              isFullscreen={isFullscreen}
+              onFullscreenChange={setIsFullscreen}
             />
         )}
 
@@ -865,6 +854,8 @@ interface DraggableResizableCameraProps {
   onCameraError: (error: boolean) => void;
   cameraKey: number;
   onRefresh: () => void;
+  isFullscreen: boolean;
+  onFullscreenChange: (fullscreen: boolean) => void;
 }
 
 function DraggableResizableCamera({ 
@@ -876,11 +867,12 @@ function DraggableResizableCamera({
   cameraError,
   onCameraError,
   cameraKey,
-  onRefresh
+  onRefresh,
+  isFullscreen,
+  onFullscreenChange
 }: DraggableResizableCameraProps) {
   const pan = useRef(new Animated.ValueXY(position)).current;
   const [isResizing, setIsResizing] = useState(false);
-  const [streamLoaded, setStreamLoaded] = useState(false);
   const webViewRef = useRef<WebView>(null);
   
   const cleanIP = piIP.replace(/^(https?:\/\/)/i, '').replace(/^(wss?:\/\/)/i, '').replace(/\/+$/, '');
@@ -892,7 +884,6 @@ function DraggableResizableCamera({
   console.log(`📹 Camera URL: ${cameraUrl}`);
   
   useEffect(() => {
-    setStreamLoaded(false);
     onCameraError(false);
   }, [cameraKey, onCameraError]);
 
@@ -922,6 +913,8 @@ function DraggableResizableCamera({
     },
   });
 
+  const initialSize = useRef(size);
+  
   const resizePanResponder = PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onStartShouldSetPanResponderCapture: () => true,
@@ -930,16 +923,66 @@ function DraggableResizableCamera({
     onPanResponderTerminationRequest: () => false,
     onPanResponderGrant: () => {
       setIsResizing(true);
+      initialSize.current = size;
     },
     onPanResponderMove: (_, gesture) => {
-      const newWidth = Math.max(150, Math.min(width * 0.8, size.width + gesture.dx));
-      const newHeight = Math.max(100, Math.min(height * 0.6, size.height + gesture.dy));
+      const newWidth = Math.max(150, Math.min(width - 40, initialSize.current.width + gesture.dx));
+      const newHeight = Math.max(100, Math.min(height - 100, initialSize.current.height + gesture.dy));
       onSizeChange({ width: newWidth, height: newHeight });
     },
     onPanResponderRelease: () => {
       setIsResizing(false);
     },
   });
+
+  const handleFullscreen = () => {
+    onFullscreenChange(!isFullscreen);
+  };
+
+  if (isFullscreen) {
+    return (
+      <View style={styles.fullscreenContainer}>
+        <View style={styles.fullscreenCameraView}>
+          <WebView
+            key={cameraKey}
+            ref={webViewRef}
+            source={{ uri: cameraUrl }}
+            style={styles.cameraWebView}
+            onLoad={() => {
+              console.log('✅ Camera WebView loaded');
+              onCameraError(false);
+            }}
+            onLoadEnd={() => {
+              console.log('✅ Camera stream ready');
+            }}
+            onError={(syntheticEvent: any) => {
+              const { nativeEvent } = syntheticEvent;
+              console.error('❌ Camera WebView error:', nativeEvent);
+              onCameraError(true);
+            }}
+            onHttpError={(syntheticEvent: any) => {
+              const { nativeEvent } = syntheticEvent;
+              console.error('❌ Camera HTTP error:', nativeEvent.statusCode, nativeEvent.url);
+              onCameraError(true);
+            }}
+            javaScriptEnabled={false}
+            domStorageEnabled={false}
+            startInLoadingState={false}
+            scrollEnabled={false}
+            bounces={false}
+            overScrollMode="never"
+            showsHorizontalScrollIndicator={false}
+            showsVerticalScrollIndicator={false}
+            mediaPlaybackRequiresUserAction={false}
+            allowsInlineMediaPlayback={true}
+          />
+        </View>
+        <Pressable onPress={handleFullscreen} style={styles.exitFullscreenButton}>
+          <Maximize2 size={24} color="#ffffff" />
+        </Pressable>
+      </View>
+    );
+  }
 
   return (
     <Animated.View
@@ -957,78 +1000,48 @@ function DraggableResizableCamera({
         <View style={styles.cameraHeader}>
           <View style={styles.cameraHeaderLeft}>
             <Video size={18} color="#f59e0b" />
-            <Text style={styles.cameraLabel}>PI CAMERA</Text>
           </View>
-          <View {...resizePanResponder.panHandlers} style={styles.resizeHandle}>
-            <Maximize2 size={16} color="#f59e0b" />
+          <View style={styles.cameraHeaderRight}>
+            <Pressable onPress={handleFullscreen} style={styles.fullscreenButton}>
+              <Maximize2 size={16} color="#f59e0b" />
+            </Pressable>
+            <View {...resizePanResponder.panHandlers} style={styles.resizeHandle}>
+              <View style={styles.resizeIcon} />
+            </View>
           </View>
         </View>
         <View style={[styles.cameraView, { width: size.width, height: size.height }]}>
-          {!cameraError ? (
-            <>
-              <WebView
-                key={cameraKey}
-                ref={webViewRef}
-                source={{ uri: cameraUrl }}
-                style={styles.cameraWebView}
-                onLoad={() => {
-                  console.log('✅ Camera WebView loaded');
-                  setStreamLoaded(true);
-                  onCameraError(false);
-                }}
-                onLoadEnd={() => {
-                  console.log('✅ Camera stream ready');
-                  setStreamLoaded(true);
-                }}
-                onError={(syntheticEvent: any) => {
-                  const { nativeEvent } = syntheticEvent;
-                  console.error('❌ Camera WebView error:', nativeEvent);
-                  onCameraError(true);
-                  setStreamLoaded(false);
-                }}
-                onHttpError={(syntheticEvent: any) => {
-                  const { nativeEvent } = syntheticEvent;
-                  console.error('❌ Camera HTTP error:', nativeEvent.statusCode, nativeEvent.url);
-                  onCameraError(true);
-                  setStreamLoaded(false);
-                }}
-                javaScriptEnabled={false}
-                domStorageEnabled={false}
-                startInLoadingState={false}
-                scrollEnabled={false}
-                bounces={false}
-                overScrollMode="never"
-                showsHorizontalScrollIndicator={false}
-                showsVerticalScrollIndicator={false}
-                mediaPlaybackRequiresUserAction={false}
-                allowsInlineMediaPlayback={true}
-              />
-              {!streamLoaded && (
-                <View style={styles.cameraLoading}>
-                  <Text style={styles.cameraLoadingText}>Loading camera...</Text>
-                </View>
-              )}
-            </>
-          ) : (
-            <View style={styles.cameraErrorView}>
-              <Text style={styles.cameraErrorText}>📹 Camera Unavailable</Text>
-              <Text style={styles.cameraErrorHint}>Make sure:</Text>
-              <Text style={styles.cameraErrorHint}>1. Python server is running</Text>
-              <Text style={styles.cameraErrorHint}>2. Camera Module 3 is connected</Text>
-              <Text style={styles.cameraErrorHint}>3. No other apps using camera</Text>
-              <Pressable onPress={onRefresh} style={styles.cameraRetryButton}>
-                <Text style={styles.cameraRetryText}>🔄 Retry</Text>
-              </Pressable>
-            </View>
-          )}
-          {!cameraError && streamLoaded && (
-            <View style={styles.cameraOverlay}>
-              <View style={styles.cameraStatus}>
-                <View style={styles.recordingDot} />
-                <Text style={styles.recordingText}>LIVE</Text>
-              </View>
-            </View>
-          )}
+          <WebView
+            key={cameraKey}
+            ref={webViewRef}
+            source={{ uri: cameraUrl }}
+            style={styles.cameraWebView}
+            onLoad={() => {
+              console.log('✅ Camera WebView loaded');
+              onCameraError(false);
+            }}
+            onLoadEnd={() => {
+              console.log('✅ Camera stream ready');
+            }}
+            onError={(syntheticEvent: any) => {
+              const { nativeEvent } = syntheticEvent;
+              console.error('❌ Camera WebView error:', nativeEvent);
+            }}
+            onHttpError={(syntheticEvent: any) => {
+              const { nativeEvent } = syntheticEvent;
+              console.error('❌ Camera HTTP error:', nativeEvent.statusCode, nativeEvent.url);
+            }}
+            javaScriptEnabled={false}
+            domStorageEnabled={false}
+            startInLoadingState={false}
+            scrollEnabled={false}
+            bounces={false}
+            overScrollMode="never"
+            showsHorizontalScrollIndicator={false}
+            showsVerticalScrollIndicator={false}
+            mediaPlaybackRequiresUserAction={false}
+            allowsInlineMediaPlayback={true}
+          />
         </View>
       </View>
     </Animated.View>
@@ -1384,11 +1397,21 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
   },
+  cameraHeaderRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
   cameraLabel: {
     color: "#f59e0b",
     fontSize: 12,
     fontWeight: "700" as const,
     letterSpacing: 1.5,
+  },
+  fullscreenButton: {
+    padding: 4,
+    backgroundColor: "rgba(245, 158, 11, 0.3)",
+    borderRadius: 6,
   },
   cameraView: {
     backgroundColor: "rgba(0, 0, 0, 0.5)",
@@ -1435,9 +1458,16 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   resizeHandle: {
-    padding: 4,
+    padding: 6,
     backgroundColor: "rgba(245, 158, 11, 0.3)",
     borderRadius: 6,
+  },
+  resizeIcon: {
+    width: 12,
+    height: 12,
+    borderRightWidth: 3,
+    borderBottomWidth: 3,
+    borderColor: "#f59e0b",
   },
   cameraLoading: {
     position: "absolute" as const,
@@ -1486,5 +1516,26 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700" as const,
   },
-
+  fullscreenContainer: {
+    position: "absolute" as const,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "#000000",
+    zIndex: 1000,
+  },
+  fullscreenCameraView: {
+    flex: 1,
+  },
+  exitFullscreenButton: {
+    position: "absolute" as const,
+    top: 50,
+    right: 20,
+    padding: 12,
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: "#f59e0b",
+  },
 });

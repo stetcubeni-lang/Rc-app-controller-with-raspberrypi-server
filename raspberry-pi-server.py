@@ -4,12 +4,12 @@ RC Car WebSocket Server + Camera Streaming for Raspberry Pi
 ============================================================
 
 This server receives commands from the mobile app, controls the RC car,
-and streams the Raspberry Pi Camera Module 3 feed over HTTP.
+and streams the Raspberry Pi Camera Module 3 feed over HTTP using libcamera-vid.
 It automatically starts ngrok tunnel for remote access.
 
 Requirements:
     pip install websockets asyncio lgpio aiohttp
-    sudo apt install -y python3-picamera2 python3-libcamera python3-kms++
+    libcamera-apps should be pre-installed on Raspberry Pi OS
     Install ngrok: https://ngrok.com/download
 
 Hardware Setup - GPIO Pin Assignments:
@@ -44,9 +44,10 @@ import websockets
 import logging
 import subprocess
 import time
+import shutil
+import threading
 from typing import Set
 from aiohttp import web
-import io
 
 # Configure logging
 logging.basicConfig(
@@ -64,18 +65,13 @@ except ImportError:
     GPIO_AVAILABLE = False
     logger.warning("lgpio library not available - running in simulation mode")
 
-# Try to import picamera2 for camera streaming
-try:
-    from picamera2 import Picamera2
-    from picamera2.encoders import MJPEGEncoder
-    from picamera2.outputs import FileOutput
-    import threading
-    CAMERA_AVAILABLE = True
-    logger.info("picamera2 library loaded - camera streaming enabled")
-except ImportError:
-    CAMERA_AVAILABLE = False
-    logger.warning("picamera2 library not available - camera streaming disabled")
-    logger.warning("Install with: sudo apt install -y python3-picamera2 python3-libcamera python3-kms++")
+# Check if libcamera-vid or rpicam-vid is available for camera streaming
+CAMERA_AVAILABLE = shutil.which('libcamera-vid') is not None or shutil.which('rpicam-vid') is not None
+if CAMERA_AVAILABLE:
+    logger.info("libcamera-vid/rpicam-vid found - camera streaming enabled")
+else:
+    logger.warning("libcamera-vid not available - camera streaming disabled")
+    logger.warning("Install with: sudo apt install -y libcamera-apps")
 
 # ========================================
 # GPIO PIN ASSIGNMENT LIST
@@ -99,91 +95,117 @@ PWM_FREQUENCY = 50
 # Connected clients
 connected_clients: Set[websockets.WebSocketServerProtocol] = set()
 
-# Camera streaming
-class StreamingOutput(io.BufferedIOBase):
-    """Buffer for camera frames"""
-    def __init__(self):
-        self.frame = None
-        self.buffer = io.BytesIO()
-        self.condition = threading.Condition()
-
-    def write(self, buf):
-        if buf.startswith(b'\xff\xd8'):
-            # Start of new JPEG frame
-            with self.condition:
-                self.frame = self.buffer.getvalue()
-                self.condition.notify_all()
-            self.buffer.seek(0)
-            self.buffer.truncate()
-        self.buffer.write(buf)
-
+# Camera streaming using libcamera-vid
 class CameraStreamer:
-    """Manages Raspberry Pi Camera Module 3 streaming"""
+    """Manages Raspberry Pi Camera Module 3 streaming using libcamera-vid"""
     def __init__(self):
-        self.camera = None
-        self.output = None
-        self.encoder = None
+        self.camera_process = None
+        self.frame_buffer = None
+        self.frame_lock = threading.Lock()
+        self.stop_flag = threading.Event()
+        self.reader_thread = None
         
         if CAMERA_AVAILABLE:
             self.setup_camera()
     
     def setup_camera(self):
-        """Initialize camera for Raspberry Pi Camera Module 3"""
+        """Initialize camera using libcamera-vid or rpicam-vid command"""
         try:
-            logger.info("Initializing Raspberry Pi Camera Module 3...")
-            self.camera = Picamera2()
+            logger.info("Starting Raspberry Pi Camera Module 3...")
             
-            # Configure camera for streaming with MJPEG
-            # Raspberry Pi Camera Module 3 supports up to 4608x2592
-            # Using 1280x720 for good quality and performance
-            config = self.camera.create_video_configuration(
-                main={"size": (1280, 720), "format": "RGB888"},
-                lores={"size": (640, 480)},
-                encode="lores"
+            # Determine which command to use
+            camera_cmd = 'rpicam-vid' if shutil.which('rpicam-vid') else 'libcamera-vid'
+            
+            # Start libcamera-vid process
+            # Output MJPEG stream to stdout, 640x480 for performance
+            cmd = [
+                camera_cmd,
+                '-t', '0',  # Run indefinitely
+                '--width', '640',
+                '--height', '480',
+                '--framerate', '30',
+                '--codec', 'mjpeg',
+                '--inline',  # Inline headers
+                '-o', '-',  # Output to stdout
+                '--nopreview',  # No preview window
+            ]
+            
+            self.camera_process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=10**8
             )
-            self.camera.configure(config)
             
-            # Create output buffer
-            self.output = StreamingOutput()
-            self.encoder = MJPEGEncoder(bitrate=10000000)  # 10Mbps for good quality
+            # Start reader thread
+            self.reader_thread = threading.Thread(target=self._read_frames, daemon=True)
+            self.reader_thread.start()
             
-            # Start camera
-            self.camera.start()
             time.sleep(2)  # Give camera time to warm up
-            self.camera.start_recording(self.encoder, FileOutput(self.output))
-            
-            logger.info("✅ Camera initialized successfully (1280x720 @ 10Mbps MJPEG)")
-            logger.info("✅ Pi Camera Module 3 ready for streaming")
+            logger.info(f"✅ Camera initialized successfully using {camera_cmd}")
+            logger.info("✅ Pi Camera Module 3 ready for streaming (640x480 @ 30fps MJPEG)")
         except Exception as e:
             logger.error(f"❌ Failed to initialize camera: {e}")
             logger.error("   Troubleshooting steps:")
-            logger.error("   1. Stop other camera apps: pkill libcamera-hello && pkill rpicam-hello")
+            logger.error("   1. Stop other camera apps: pkill libcamera-vid && pkill rpicam-vid")
             logger.error("   2. Check camera is detected: libcamera-hello --list-cameras")
-            logger.error("   3. Install packages: sudo apt install -y python3-picamera2 python3-libcamera")
+            logger.error("   3. Install packages: sudo apt install -y libcamera-apps")
             logger.error("   4. Reboot Pi if needed: sudo reboot")
-            self.camera = None
+            self.camera_process = None
+    
+    def _read_frames(self):
+        """Read frames from libcamera-vid stdout in background thread"""
+        if not self.camera_process:
+            return
+        
+        buffer = b''
+        while not self.stop_flag.is_set():
+            try:
+                chunk = self.camera_process.stdout.read(4096)
+                if not chunk:
+                    break
+                
+                buffer += chunk
+                
+                # Find JPEG markers
+                start = buffer.find(b'\xff\xd8')  # JPEG start
+                end = buffer.find(b'\xff\xd9')    # JPEG end
+                
+                if start != -1 and end != -1 and end > start:
+                    # Extract complete JPEG frame
+                    frame = buffer[start:end+2]
+                    with self.frame_lock:
+                        self.frame_buffer = frame
+                    
+                    # Remove processed frame from buffer
+                    buffer = buffer[end+2:]
+            except Exception as e:
+                logger.error(f"Frame read error: {e}")
+                break
     
     def get_frame(self):
         """Get latest frame"""
-        if not self.output:
-            return None
-        
-        with self.output.condition:
-            self.output.condition.wait(timeout=1.0)
-            frame = self.output.frame
-            if frame:
-                return frame
-            return None
+        with self.frame_lock:
+            return self.frame_buffer
     
     def cleanup(self):
         """Stop camera"""
-        if self.camera:
+        logger.info("Stopping camera...")
+        self.stop_flag.set()
+        
+        if self.camera_process:
             try:
-                self.camera.stop_recording()
-                self.camera.close()
+                self.camera_process.terminate()
+                self.camera_process.wait(timeout=5)
                 logger.info("Camera stopped")
             except:
-                pass
+                try:
+                    self.camera_process.kill()
+                except:
+                    pass
+        
+        if self.reader_thread:
+            self.reader_thread.join(timeout=2)
 
 # Initialize camera
 camera_streamer = None
@@ -448,7 +470,7 @@ async def handle_client(websocket: websockets.WebSocketServerProtocol):
 # HTTP handlers for camera streaming
 async def stream_handler(request):
     """MJPEG stream handler for continuous streaming"""
-    if not camera_streamer or not camera_streamer.camera:
+    if not camera_streamer or not camera_streamer.camera_process:
         logger.warning("Camera stream requested but camera not available")
         return web.Response(text="Camera not available. Make sure camera is connected and not used by other apps.", status=503)
     
@@ -461,13 +483,16 @@ async def stream_handler(request):
     await response.prepare(request)
     
     frame_count = 0
+    last_frame = None
     try:
         while True:
-            frame = await asyncio.get_event_loop().run_in_executor(
-                None, camera_streamer.get_frame
-            )
-            if frame:
+            frame = camera_streamer.get_frame()
+            
+            # Only send if we have a new frame
+            if frame and frame != last_frame:
                 frame_count += 1
+                last_frame = frame
+                
                 if frame_count % 30 == 0:
                     logger.info(f"Streamed {frame_count} frames to {request.remote}")
                 
@@ -477,7 +502,8 @@ async def stream_handler(request):
                     b'Content-Length: ' + str(len(frame)).encode() + b'\r\n\r\n' + 
                     frame + b'\r\n'
                 )
-                await asyncio.sleep(0.033)  # ~30 FPS
+            
+            await asyncio.sleep(0.033)  # ~30 FPS
     except (asyncio.CancelledError, ConnectionResetError):
         logger.info(f"Camera stream closed for client {request.remote} (streamed {frame_count} frames)")
     except Exception as e:
@@ -494,7 +520,7 @@ async def root_handler(request):
     if action == 'stream':
         return await stream_handler(request)
     
-    camera_status = "✅ Active (Pi Camera Module 3)" if (camera_streamer and camera_streamer.camera) else "❌ Not Available"
+    camera_status = "✅ Active (Pi Camera Module 3)" if (camera_streamer and camera_streamer.camera_process) else "❌ Not Available"
     
     html = """
     <html>
@@ -544,17 +570,17 @@ async def root_handler(request):
         <div class="info">
             <p><strong>Stream URL for Mobile App:</strong></p>
             <p><code>http://YOUR_PI_IP:8080/?action=stream</code></p>
-            <p><strong>Resolution:</strong> 1280x720 @ 30fps</p>
-            <p><strong>Encoder:</strong> MJPEG</p>
+            <p><strong>Resolution:</strong> 640x480 @ 30fps</p>
+            <p><strong>Encoder:</strong> MJPEG (libcamera-vid)</p>
         </div>
-        """ if (camera_streamer and camera_streamer.camera) else """
+        """ if (camera_streamer and camera_streamer.camera_process) else """
         <div class="info">
             <p><strong>❌ Camera Not Available</strong></p>
             <p><strong>Troubleshooting:</strong></p>
             <ol style="text-align: left;">
                 <li>Check camera connection: <code>libcamera-hello --list-cameras</code></li>
-                <li>Stop other camera apps: <code>pkill libcamera-hello && pkill rpicam-hello</code></li>
-                <li>Install packages: <code>sudo apt install -y python3-picamera2 python3-libcamera</code></li>
+                <li>Stop other camera apps: <code>pkill libcamera-vid && pkill rpicam-vid</code></li>
+                <li>Install libcamera-apps: <code>sudo apt install -y libcamera-apps</code></li>
                 <li>Reboot if needed: <code>sudo reboot</code></li>
             </ol>
         </div>
@@ -688,15 +714,15 @@ async def main():
     print("")
     print("📹 CAMERA STREAM:")
     print("=" * 70)
-    if CAMERA_AVAILABLE and camera_streamer and camera_streamer.camera:
-        print(f"   ✅ Camera Active")
+    if CAMERA_AVAILABLE and camera_streamer and camera_streamer.camera_process:
+        print(f"   ✅ Camera Active (libcamera-vid)")
         print(f"   Local: http://{local_ip}:8080/?action=stream")
         print(f"   View in browser: http://{local_ip}:8080/")
     else:
         print("   ❌ Camera Not Available")
-        print("   Install: sudo apt install -y python3-picamera2 python3-libcamera")
-        print("   Stop other apps: pkill libcamera-hello && pkill rpicam-hello")
-        print("   Enable: sudo raspi-config -> Interface Options -> Camera")
+        print("   Install: sudo apt install -y libcamera-apps")
+        print("   Stop other apps: pkill libcamera-vid && pkill rpicam-vid")
+        print("   Check detection: libcamera-hello --list-cameras")
     print("=" * 70)
     print("")
     

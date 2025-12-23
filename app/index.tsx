@@ -44,6 +44,7 @@ export default function RCCarController() {
   const [hasLoadedCameraSettings, setHasLoadedCameraSettings] = useState(false);
   const [cameraError, setCameraError] = useState(false);
   const [cameraKey, setCameraKey] = useState(0);
+  const [isNgrokConnection, setIsNgrokConnection] = useState(false);
   
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -56,6 +57,10 @@ export default function RCCarController() {
   useEffect(() => {
     if (!piIP) {
       setShowSettings(true);
+    } else {
+      const cleanIP = piIP.trim().replace(/^(https?:\/\/)/i, '').replace(/^(wss?:\/\/)/i, '').replace(/\/+$/, '');
+      const isNgrok = cleanIP.includes('.ngrok-free.dev') || cleanIP.includes('.ngrok-free.app') || cleanIP.includes('.ngrok.');
+      setIsNgrokConnection(isNgrok);
     }
   }, [piIP]);
 
@@ -406,16 +411,27 @@ export default function RCCarController() {
                       Troubleshooting:
                     </Text>
                     <Text style={[styles.errorHint, { color: '#fca5a5' }]}>
-                      1. Python server running on Pi?
+                      1. Python server running: python3 raspberry-pi-server.py
                     </Text>
                     <Text style={[styles.errorHint, { color: '#fca5a5' }]}>
-                      2. ngrok running with correct command?
+                      2. ngrok running: ngrok http 8765 --host-header=rewrite
                     </Text>
                     <Text style={[styles.errorHint, { color: '#fca5a5' }]}>
-                      3. URL matches ngrok tunnel?
+                      3. Check ngrok shows &quot;online&quot; status
+                    </Text>
+                    <Text style={[styles.errorHint, { color: '#fca5a5' }]}>
+                      4. Try restarting both server and ngrok
                     </Text>
                   </View>
                 )}
+              </View>
+            )}
+            {isConnected && isNgrokConnection && (
+              <View style={[styles.errorContainer, { borderColor: 'rgba(251, 191, 36, 0.4)', backgroundColor: 'rgba(251, 191, 36, 0.1)' }]}>
+                <Text style={[styles.errorText, { color: '#fbbf24' }]}>⚠️ Camera not available via ngrok</Text>
+                <Text style={[styles.errorHint, { color: '#d97706' }]}>
+                  Camera needs direct connection. Use same WiFi or setup second ngrok tunnel for port 8080.
+                </Text>
               </View>
             )}
           </View>
@@ -461,10 +477,11 @@ export default function RCCarController() {
                 <Text style={[styles.helpTitle, { marginTop: 12 }]}>Remote Access (ngrok):</Text>
                 <Text style={styles.helpText}>1. On Pi: python3 raspberry-pi-server.py</Text>
                 <Text style={[styles.helpText, { color: '#f59e0b', fontWeight: '700' as const }]}>2. New terminal: ngrok http 8765 --host-header=rewrite</Text>
-                <Text style={styles.helpText}>3. Copy ONLY hostname from Forwarding line</Text>
+                <Text style={styles.helpText}>3. Wait for &quot;Session Status: online&quot;</Text>
+                <Text style={styles.helpText}>4. Copy ONLY hostname from Forwarding line</Text>
                 <Text style={styles.helpText}>Example: abc123.ngrok-free.app</Text>
                 <Text style={[styles.helpText, { color: '#ef4444', fontWeight: '700' as const, marginTop: 4 }]}>⚠️ No https://, no ws://, no port!</Text>
-                <Text style={[styles.helpText, { color: '#10b981', fontWeight: '700' as const }]}>✅ App auto-uses WSS (ngrok handles upgrade)</Text>
+                <Text style={[styles.helpText, { color: '#ef4444', fontWeight: '700' as const }]}>⚠️ Camera unavailable with ngrok (controls only)</Text>
               </View>
 
               <View style={styles.modalButtons}>
@@ -573,7 +590,7 @@ export default function RCCarController() {
         </View>
 
         <View style={styles.cameraAreaContainer}>
-          {hasLoadedCameraSettings && piIP && (
+          {hasLoadedCameraSettings && piIP && !isNgrokConnection && (
             <DraggableResizableCamera 
               piIP={piIP}
               position={cameraPosition}

@@ -12,7 +12,7 @@ import {
   Animated,
   PanResponder,
 } from "react-native";
-import { GestureDetector, Gesture, GestureHandlerRootView } from 'react-native-gesture-handler';
+import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import { LinearGradient } from "expo-linear-gradient";
 import { Zap, Video, Settings as SettingsIcon, Maximize2 } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -360,11 +360,10 @@ export default function RCCarController() {
   }, [gear, lightsOn, autoMode]);
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <LinearGradient
-        colors={["#1a1410", "#2d1810", "#1a1410"]}
-        style={styles.container}
-      >
+    <LinearGradient
+      colors={["#1a1410", "#2d1810", "#1a1410"]}
+      style={styles.container}
+    >
         <View style={[styles.safeArea, { paddingTop: insets.top }]}>
         <View style={styles.statusBar}>
           <View style={styles.statusBarContent}>
@@ -622,7 +621,6 @@ export default function RCCarController() {
         </View>
         </View>
       </LinearGradient>
-    </GestureHandlerRootView>
   );
 }
 

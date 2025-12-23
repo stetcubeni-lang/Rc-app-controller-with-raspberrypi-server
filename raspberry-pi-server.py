@@ -40,7 +40,6 @@ Usage:
 
 import asyncio
 import json
-import websockets
 import logging
 import subprocess
 import time
@@ -93,7 +92,7 @@ GEAR_3_PIN = 26             # Digital: Gear 3 active
 PWM_FREQUENCY = 50
 
 # Connected clients
-connected_clients: Set[websockets.WebSocketServerProtocol] = set()
+connected_clients: Set[web.WebSocketResponse] = set()
 
 # Camera streaming using libcamera-vid
 class CameraStreamer:
@@ -406,66 +405,71 @@ class RCCarController:
 # Initialize RC car controller
 rc_car = RCCarController()
 
-async def handle_client(websocket: websockets.WebSocketServerProtocol):
-    """Handle WebSocket client connection"""
-    client_address = websocket.remote_address
+async def websocket_handler(request):
+    """Handle WebSocket client connection using aiohttp"""
+    ws = web.WebSocketResponse()
+    await ws.prepare(request)
+    
+    client_address = request.remote
     logger.info(f"✅ Client connected: {client_address}")
-    connected_clients.add(websocket)
+    connected_clients.add(ws)
     
     try:
-        async for message in websocket:
-            try:
-                data = json.loads(message)
-                command_type = data.get('type')
-                
-                if command_type == 'throttle_forward':
-                    value = data.get('value', 0)
-                    rc_car.set_throttle_forward(value)
-                
-                elif command_type == 'throttle_backward':
-                    value = data.get('value', 0)
-                    rc_car.set_throttle_backward(value)
-                
-                elif command_type == 'steering_right':
-                    value = data.get('value', 0)
-                    rc_car.set_steering_right(value)
-                
-                elif command_type == 'steering_left':
-                    value = data.get('value', 0)
-                    rc_car.set_steering_left(value)
-                
-                elif command_type == 'brake':
-                    value = data.get('value', 0)
-                    rc_car.set_brake(value)
-                
-                elif command_type == 'honk':
-                    value = data.get('value', False)
-                    rc_car.set_honk(value)
-                
-                elif command_type == 'settings':
-                    gear = data.get('gear', 1)
-                    lights = data.get('lights', False)
-                    auto = data.get('auto', False)
-                    rc_car.set_gear(gear)
-                    rc_car.set_lights(lights)
-                    rc_car.set_auto_mode(auto)
-                
-            except json.JSONDecodeError:
-                logger.error(f"Invalid JSON received: {message}")
-            except Exception as e:
-                logger.error(f"Error processing message: {e}")
-    
-    except websockets.exceptions.ConnectionClosed:
-        logger.info(f"❌ Client disconnected: {client_address}")
+        async for msg in ws:
+            if msg.type == web.WSMsgType.TEXT:
+                try:
+                    data = json.loads(msg.data)
+                    command_type = data.get('type')
+                    
+                    if command_type == 'throttle_forward':
+                        value = data.get('value', 0)
+                        rc_car.set_throttle_forward(value)
+                    
+                    elif command_type == 'throttle_backward':
+                        value = data.get('value', 0)
+                        rc_car.set_throttle_backward(value)
+                    
+                    elif command_type == 'steering_right':
+                        value = data.get('value', 0)
+                        rc_car.set_steering_right(value)
+                    
+                    elif command_type == 'steering_left':
+                        value = data.get('value', 0)
+                        rc_car.set_steering_left(value)
+                    
+                    elif command_type == 'brake':
+                        value = data.get('value', 0)
+                        rc_car.set_brake(value)
+                    
+                    elif command_type == 'honk':
+                        value = data.get('value', False)
+                        rc_car.set_honk(value)
+                    
+                    elif command_type == 'settings':
+                        gear = data.get('gear', 1)
+                        lights = data.get('lights', False)
+                        auto = data.get('auto', False)
+                        rc_car.set_gear(gear)
+                        rc_car.set_lights(lights)
+                        rc_car.set_auto_mode(auto)
+                    
+                except json.JSONDecodeError:
+                    logger.error(f"Invalid JSON received: {msg.data}")
+                except Exception as e:
+                    logger.error(f"Error processing message: {e}")
+            elif msg.type == web.WSMsgType.ERROR:
+                logger.error(f'WebSocket error: {ws.exception()}')
     finally:
-        connected_clients.remove(websocket)
-        # Reset to safe state when client disconnects
+        logger.info(f"❌ Client disconnected: {client_address}")
+        connected_clients.discard(ws)
         rc_car.set_throttle_forward(0)
         rc_car.set_throttle_backward(0)
         rc_car.set_steering_right(0)
         rc_car.set_steering_left(0)
         rc_car.set_brake(0)
         rc_car.set_honk(False)
+    
+    return ws
 
 # HTTP handlers for camera streaming
 async def stream_handler(request):
@@ -585,19 +589,23 @@ async def root_handler(request):
     """
     return web.Response(text=html, content_type='text/html')
 
-async def start_http_server():
-    """Start HTTP server for camera streaming on port 8765 (same as WebSocket)"""
+async def start_combined_server():
+    """Start combined HTTP/WebSocket server on port 8765"""
     app = web.Application()
     app.router.add_get('/camera', stream_handler)
     app.router.add_get('/camera-info', root_handler)
+    app.router.add_get('/ws', websocket_handler)
+    app.router.add_get('/', root_handler)
     
     runner = web.AppRunner(app)
     await runner.setup()
     
-    site = web.TCPSite(runner, '0.0.0.0', 8765, reuse_address=True, reuse_port=True)
+    site = web.TCPSite(runner, '0.0.0.0', 8765)
     await site.start()
     
-    logger.info("📹 HTTP Camera Server started on port 8765 (combined with WebSocket)")
+    logger.info("📹 Combined HTTP/WebSocket Server started on port 8765")
+    
+    return runner
 
 async def start_ngrok():
     """Start ngrok tunnel in background"""
@@ -643,7 +651,7 @@ async def start_ngrok():
         return None
 
 async def main():
-    """Start WebSocket server and HTTP camera server"""
+    """Start combined HTTP/WebSocket server"""
     # Get local IP address
     import socket
     hostname = socket.gethostname()
@@ -652,8 +660,8 @@ async def main():
     except:
         local_ip = "unknown"
     
-    # Start HTTP server for camera
-    await start_http_server()
+    # Start combined server
+    runner = await start_combined_server()
     
     # Start ngrok tunnel
     ngrok_url = await start_ngrok()
@@ -695,7 +703,7 @@ async def main():
         print("   └────────────────────────────────────────┘")
         print("")
         print("   ⚠️  Copy ONLY hostname - no https://, no wss://, no port!")
-        print("   ⚠️  WebSocket upgrade happens automatically")
+        print("   ⚠️  WebSocket connects to /ws endpoint")
         print("   ✅  Camera ALSO works via ngrok (combined port)")
     else:
         print("   ❌ ngrok not started automatically")
@@ -729,18 +737,11 @@ async def main():
     
     logger.info("\n✅ Server is running. Waiting for connections...\n")
     
-    # Configure WebSocket server to accept all origins (needed for ngrok)
-    async with websockets.serve(
-        handle_client, 
-        "0.0.0.0", 
-        8765,
-        # Allow connections from any origin (ngrok, local network, etc.)
-        origins=None,
-        # Increase ping interval and timeout for ngrok stability
-        ping_interval=20,
-        ping_timeout=20
-    ):
-        await asyncio.Future()  # Run forever
+    # Keep server running
+    try:
+        await asyncio.Future()
+    finally:
+        await runner.cleanup()
 
 if __name__ == "__main__":
     try:

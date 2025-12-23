@@ -12,7 +12,6 @@ import {
   PanResponder,
 } from "react-native";
 import { WebView } from 'react-native-webview';
-import { Image } from 'expo-image';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import { LinearGradient } from "expo-linear-gradient";
 import { Zap, Video, Settings as SettingsIcon, Maximize2 } from "lucide-react-native";
@@ -955,19 +954,16 @@ function DraggableResizableCamera({
       <View style={styles.fullscreenContainer}>
         <View style={styles.fullscreenCameraView}>
           {Platform.OS === 'web' ? (
-            <Image
+            <iframe
               key={cameraKey}
-              source={{ uri: cameraUrl }}
-              style={styles.cameraWebView}
-              contentFit="contain"
-              onLoad={() => {
-                console.log('✅ Camera stream loaded');
-                onCameraError(false);
+              src={cameraUrl}
+              style={{
+                width: '100%',
+                height: '100%',
+                border: 'none',
+                backgroundColor: '#000000',
               }}
-              onError={() => {
-                console.error('❌ Camera stream error');
-                onCameraError(true);
-              }}
+              allow="autoplay"
             />
           ) : (
             <WebView
@@ -977,6 +973,7 @@ function DraggableResizableCamera({
                 uri: cameraUrl,
                 headers: {
                   'ngrok-skip-browser-warning': 'true',
+                  'User-Agent': 'RCCarApp/1.0',
                 }
               }}
               style={styles.cameraWebView}
@@ -1039,30 +1036,27 @@ function DraggableResizableCamera({
             >
               <Maximize2 size={18} color="#1a1410" />
             </Pressable>
-            <View 
+            <Pressable 
               {...resizePanResponder.panHandlers} 
               style={styles.resizeHandle}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             >
               <View style={styles.resizeIcon} />
-            </View>
+            </Pressable>
           </View>
         </View>
         <View style={[styles.cameraView, { width: size.width, height: size.height }]}>
           {Platform.OS === 'web' ? (
-            <Image
+            <iframe
               key={cameraKey}
-              source={{ uri: cameraUrl }}
-              style={styles.cameraWebView}
-              contentFit="cover"
-              onLoad={() => {
-                console.log('✅ Camera stream loaded');
-                onCameraError(false);
+              src={cameraUrl}
+              style={{
+                width: '100%',
+                height: '100%',
+                border: 'none',
+                backgroundColor: '#000000',
               }}
-              onError={() => {
-                console.error('❌ Camera stream error');
-                onCameraError(true);
-              }}
+              allow="autoplay"
             />
           ) : (
             <WebView
@@ -1072,6 +1066,7 @@ function DraggableResizableCamera({
                 uri: cameraUrl,
                 headers: {
                   'ngrok-skip-browser-warning': 'true',
+                  'User-Agent': 'RCCarApp/1.0',
                 }
               }}
               style={styles.cameraWebView}
@@ -1528,6 +1523,7 @@ const styles = StyleSheet.create({
     padding: 12,
     backgroundColor: "rgba(245, 158, 11, 0.9)",
     borderRadius: 6,
+    cursor: 'nwse-resize' as any,
   },
   resizeIcon: {
     width: 16,

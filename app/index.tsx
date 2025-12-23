@@ -12,6 +12,7 @@ import {
   PanResponder,
 } from "react-native";
 import { WebView } from 'react-native-webview';
+import { Image } from 'expo-image';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import { LinearGradient } from "expo-linear-gradient";
 import { Zap, Video, Settings as SettingsIcon, Maximize2 } from "lucide-react-native";
@@ -946,43 +947,60 @@ function DraggableResizableCamera({
     return (
       <View style={styles.fullscreenContainer}>
         <View style={styles.fullscreenCameraView}>
-          <WebView
-            key={cameraKey}
-            ref={webViewRef}
-            source={{ 
-              uri: cameraUrl,
-              headers: {
-                'ngrok-skip-browser-warning': 'true',
-                'User-Agent': 'RC-Car-App/1.0'
-              }
-            }}
-            style={styles.cameraWebView}
-            onLoad={() => {
-              console.log('✅ Camera WebView loaded');
-              onCameraError(false);
-            }}
-            onLoadEnd={() => {
-              console.log('✅ Camera stream ready');
-            }}
-            onError={(syntheticEvent: any) => {
-              const { nativeEvent } = syntheticEvent;
-              console.error('❌ Camera WebView error:', nativeEvent);
-            }}
-            onHttpError={(syntheticEvent: any) => {
-              const { nativeEvent } = syntheticEvent;
-              console.error('❌ Camera HTTP error:', nativeEvent.statusCode, nativeEvent.url);
-            }}
-            javaScriptEnabled={true}
-            domStorageEnabled={false}
-            startInLoadingState={false}
-            scrollEnabled={false}
-            bounces={false}
-            overScrollMode="never"
-            showsHorizontalScrollIndicator={false}
-            showsVerticalScrollIndicator={false}
-            mediaPlaybackRequiresUserAction={false}
-            allowsInlineMediaPlayback={true}
-          />
+          {Platform.OS === 'web' ? (
+            <Image
+              key={cameraKey}
+              source={{ uri: cameraUrl }}
+              style={styles.cameraWebView}
+              contentFit="contain"
+              onLoad={() => {
+                console.log('✅ Camera stream loaded');
+                onCameraError(false);
+              }}
+              onError={() => {
+                console.error('❌ Camera stream error');
+                onCameraError(true);
+              }}
+            />
+          ) : (
+            <WebView
+              key={cameraKey}
+              ref={webViewRef}
+              source={{ 
+                uri: cameraUrl,
+                headers: {
+                  'ngrok-skip-browser-warning': 'true',
+                  'User-Agent': 'RC-Car-App/1.0'
+                }
+              }}
+              style={styles.cameraWebView}
+              onLoad={() => {
+                console.log('✅ Camera WebView loaded');
+                onCameraError(false);
+              }}
+              onLoadEnd={() => {
+                console.log('✅ Camera stream ready');
+              }}
+              onError={(syntheticEvent: any) => {
+                const { nativeEvent } = syntheticEvent;
+                console.error('❌ Camera WebView error:', nativeEvent);
+              }}
+              onHttpError={(syntheticEvent: any) => {
+                const { nativeEvent } = syntheticEvent;
+                console.error('❌ Camera HTTP error:', nativeEvent.statusCode, nativeEvent.url);
+              }}
+              javaScriptEnabled={true}
+              domStorageEnabled={false}
+              startInLoadingState={false}
+              scrollEnabled={false}
+              bounces={false}
+              overScrollMode="never"
+              showsHorizontalScrollIndicator={false}
+              showsVerticalScrollIndicator={false}
+              mediaPlaybackRequiresUserAction={false}
+              allowsInlineMediaPlayback={true}
+            />
+          )}
         </View>
         <Pressable onPress={handleFullscreen} style={styles.exitFullscreenButton}>
           <Maximize2 size={24} color="#ffffff" />
@@ -1025,44 +1043,61 @@ function DraggableResizableCamera({
           </View>
         </View>
         <View style={[styles.cameraView, { width: size.width, height: size.height }]}>
-          <WebView
-            key={cameraKey}
-            ref={webViewRef}
-            source={{ 
-              uri: cameraUrl,
-              headers: {
-                'ngrok-skip-browser-warning': 'true',
-                'User-Agent': 'RC-Car-App/1.0'
-              }
-            }}
-            style={styles.cameraWebView}
-            pointerEvents="none"
-            onLoad={() => {
-              console.log('✅ Camera WebView loaded');
-            }}
-            onLoadEnd={() => {
-              console.log('✅ Camera stream ready');
-            }}
-            onError={(syntheticEvent: any) => {
-              const { nativeEvent } = syntheticEvent;
-              console.error('❌ Camera WebView error:', nativeEvent);
-            }}
-            onHttpError={(syntheticEvent: any) => {
-              const { nativeEvent } = syntheticEvent;
-              console.error('❌ Camera HTTP error:', nativeEvent.statusCode, nativeEvent.url);
-            }}
-            javaScriptEnabled={true}
-            domStorageEnabled={false}
-            startInLoadingState={false}
-            scrollEnabled={false}
-            bounces={false}
-            overScrollMode="never"
-            showsHorizontalScrollIndicator={false}
-            showsVerticalScrollIndicator={false}
-            mediaPlaybackRequiresUserAction={false}
-            allowsInlineMediaPlayback={true}
-            mixedContentMode="always"
-          />
+          {Platform.OS === 'web' ? (
+            <Image
+              key={cameraKey}
+              source={{ uri: cameraUrl }}
+              style={styles.cameraWebView}
+              contentFit="cover"
+              onLoad={() => {
+                console.log('✅ Camera stream loaded');
+                onCameraError(false);
+              }}
+              onError={() => {
+                console.error('❌ Camera stream error');
+                onCameraError(true);
+              }}
+            />
+          ) : (
+            <WebView
+              key={cameraKey}
+              ref={webViewRef}
+              source={{ 
+                uri: cameraUrl,
+                headers: {
+                  'ngrok-skip-browser-warning': 'true',
+                  'User-Agent': 'RC-Car-App/1.0'
+                }
+              }}
+              style={styles.cameraWebView}
+              pointerEvents="none"
+              onLoad={() => {
+                console.log('✅ Camera WebView loaded');
+              }}
+              onLoadEnd={() => {
+                console.log('✅ Camera stream ready');
+              }}
+              onError={(syntheticEvent: any) => {
+                const { nativeEvent } = syntheticEvent;
+                console.error('❌ Camera WebView error:', nativeEvent);
+              }}
+              onHttpError={(syntheticEvent: any) => {
+                const { nativeEvent } = syntheticEvent;
+                console.error('❌ Camera HTTP error:', nativeEvent.statusCode, nativeEvent.url);
+              }}
+              javaScriptEnabled={true}
+              domStorageEnabled={false}
+              startInLoadingState={false}
+              scrollEnabled={false}
+              bounces={false}
+              overScrollMode="never"
+              showsHorizontalScrollIndicator={false}
+              showsVerticalScrollIndicator={false}
+              mediaPlaybackRequiresUserAction={false}
+              allowsInlineMediaPlayback={true}
+              mixedContentMode="always"
+            />
+          )}
         </View>
       </View>
     </Animated.View>

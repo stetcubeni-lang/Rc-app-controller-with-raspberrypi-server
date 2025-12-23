@@ -5,13 +5,13 @@ import {
   StyleSheet,
   Pressable,
   Dimensions,
-  Image,
   TextInput,
   Modal,
   Platform,
   Animated,
   PanResponder,
 } from "react-native";
+import { WebView } from 'react-native-webview';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import { LinearGradient } from "expo-linear-gradient";
 import { Zap, Video, Settings as SettingsIcon, Maximize2 } from "lucide-react-native";
@@ -869,12 +869,18 @@ function DraggableResizableCamera({
 }: DraggableResizableCameraProps) {
   const pan = useRef(new Animated.ValueXY(position)).current;
   const [isResizing, setIsResizing] = useState(false);
-  const [imageLoaded, setImageLoaded] = useState(false);
+  const [streamLoaded, setStreamLoaded] = useState(false);
+  const webViewRef = useRef<WebView>(null);
   
   const cleanIP = piIP.replace(/^(https?:\/\/)/i, '').replace(/^(wss?:\/\/)/i, '').replace(/\/+$/, '');
   const cameraUrl = `http://${cleanIP.replace(/:\d+$/, '')}:8080/?action=stream`;
   
   console.log(`📹 Camera URL: ${cameraUrl}`);
+  
+  useEffect(() => {
+    setStreamLoaded(false);
+    onCameraError(false);
+  }, [cameraKey, onCameraError]);
 
   const dragPanResponder = useRef(
     PanResponder.create({
@@ -949,28 +955,47 @@ function DraggableResizableCamera({
         <View style={[styles.cameraView, { width: size.width, height: size.height }]}>
           {!cameraError ? (
             <>
-              <Image
+              <WebView
                 key={cameraKey}
-                source={{ 
-                  uri: cameraUrl,
-                  cache: 'reload'
-                }}
-                style={styles.cameraImage}
-                resizeMode="cover"
+                ref={webViewRef}
+                source={{ uri: cameraUrl }}
+                style={styles.cameraWebView}
                 onLoad={() => {
-                  setImageLoaded(true);
+                  console.log('✅ Camera WebView loaded');
+                  setStreamLoaded(true);
                   onCameraError(false);
-                  console.log('✅ Camera stream loaded successfully');
                 }}
-                onError={(error) => {
-                  console.error('❌ Camera stream error:', error.nativeEvent.error);
+                onLoadEnd={() => {
+                  console.log('✅ Camera stream ready');
+                  setStreamLoaded(true);
+                }}
+                onError={(syntheticEvent: any) => {
+                  const { nativeEvent } = syntheticEvent;
+                  console.error('❌ Camera WebView error:', nativeEvent);
                   onCameraError(true);
-                  setImageLoaded(false);
+                  setStreamLoaded(false);
                 }}
+                onHttpError={(syntheticEvent: any) => {
+                  const { nativeEvent } = syntheticEvent;
+                  console.error('❌ Camera HTTP error:', nativeEvent.statusCode, nativeEvent.url);
+                  onCameraError(true);
+                  setStreamLoaded(false);
+                }}
+                javaScriptEnabled={false}
+                domStorageEnabled={false}
+                startInLoadingState={false}
+                scrollEnabled={false}
+                bounces={false}
+                overScrollMode="never"
+                showsHorizontalScrollIndicator={false}
+                showsVerticalScrollIndicator={false}
+                mediaPlaybackRequiresUserAction={false}
+                allowsInlineMediaPlayback={true}
               />
-              {!imageLoaded && (
+              {!streamLoaded && (
                 <View style={styles.cameraLoading}>
-                  <Text style={styles.cameraLoadingText}>Loading camera...</Text>
+                  <Text style={styles.cameraLoadingText}>Loading camera stream...</Text>
+                  <Text style={[styles.cameraLoadingText, { fontSize: 11, marginTop: 4, opacity: 0.7 }]}>{cameraUrl}</Text>
                 </View>
               )}
             </>
@@ -986,7 +1011,7 @@ function DraggableResizableCamera({
               </Pressable>
             </View>
           )}
-          {!cameraError && imageLoaded && (
+          {!cameraError && streamLoaded && (
             <View style={styles.cameraOverlay}>
               <View style={styles.cameraStatus}>
                 <View style={styles.recordingDot} />
@@ -1362,9 +1387,10 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     position: "relative" as const,
   },
-  cameraImage: {
+  cameraWebView: {
     width: "100%",
     height: "100%",
+    backgroundColor: "transparent",
   },
   cameraOverlay: {
     position: "absolute" as const,

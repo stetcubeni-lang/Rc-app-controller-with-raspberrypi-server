@@ -131,13 +131,6 @@ class CameraStreamer:
         """Initialize camera for Raspberry Pi Camera Module 3"""
         try:
             logger.info("Initializing Raspberry Pi Camera Module 3...")
-            
-            # Kill any conflicting camera processes
-            logger.info("Stopping conflicting camera processes...")
-            subprocess.run(['pkill', '-f', 'libcamera'], stderr=subprocess.DEVNULL)
-            subprocess.run(['pkill', '-f', 'rpicam'], stderr=subprocess.DEVNULL)
-            time.sleep(1)
-            
             self.camera = Picamera2()
             
             # Configure camera for streaming with MJPEG
@@ -164,7 +157,7 @@ class CameraStreamer:
         except Exception as e:
             logger.error(f"❌ Failed to initialize camera: {e}")
             logger.error("   Troubleshooting steps:")
-            logger.error("   1. Stop other camera apps: pkill -f libcamera && pkill -f rpicam")
+            logger.error("   1. Stop other camera apps: pkill libcamera-hello && pkill rpicam-hello")
             logger.error("   2. Check camera is detected: libcamera-hello --list-cameras")
             logger.error("   3. Install packages: sudo apt install -y python3-picamera2 python3-libcamera")
             logger.error("   4. Reboot Pi if needed: sudo reboot")
@@ -721,12 +714,8 @@ async def main():
         # Allow connections from any origin (ngrok, local network, etc.)
         origins=None,
         # Increase ping interval and timeout for ngrok stability
-        ping_interval=30,
-        ping_timeout=30,
-        # Increase max message size
-        max_size=10485760,
-        # Disable compression for better compatibility
-        compression=None
+        ping_interval=20,
+        ping_timeout=20
     ):
         await asyncio.Future()  # Run forever
 

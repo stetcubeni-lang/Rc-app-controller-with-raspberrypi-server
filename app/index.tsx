@@ -157,6 +157,10 @@ export default function RCCarController() {
         cleanIP = cleanIP.replace(/:\d+$/, '');
         url = `wss://${cleanIP}`;
         console.log(`🔒 Detected ngrok URL, using secure WSS: ${url}`);
+        console.log(`📋 Make sure on Pi:`);
+        console.log(`   1. python3 raspberry-pi-server.py is running`);
+        console.log(`   2. ngrok http 8765 --host-header=rewrite is running`);
+        console.log(`   3. Both must be running BEFORE connecting!`);
       } else if (cleanIP.includes(':')) {
         url = `ws://${cleanIP}`;
       } else {
@@ -197,7 +201,12 @@ export default function RCCarController() {
         
         if (event.code === 1006) {
           if (cleanIP.includes('.ngrok')) {
-            setConnectionError("ngrok connection failed. Is Python server running?");
+            setConnectionError("Connection refused - Server not responding");
+            console.log(`❌ CRITICAL: Cannot reach server at ${url}`);
+            console.log(`   This usually means:`);
+            console.log(`   1. Python server is NOT running on Pi`);
+            console.log(`   2. ngrok tunnel is NOT active`);
+            console.log(`   3. Wrong hostname in settings`);
           } else {
             setConnectionError("Connection failed. Is the server running?");
           }
@@ -215,11 +224,12 @@ export default function RCCarController() {
             connectToServer();
           }, backoffDelay);
         } else if (connectionAttempts >= 5) {
-          setConnectionError("Failed after 5 attempts. Check settings and restart server.");
+          setConnectionError("Failed after 5 attempts. Check server & ngrok.");
           console.log("❌ Max reconnection attempts reached. Please check:");
-          console.log("   1. Is Python server running?");
-          console.log("   2. Is ngrok running with: ngrok http 8765 --host-header=rewrite");
+          console.log("   1. Is Python server running: python3 raspberry-pi-server.py");
+          console.log("   2. Is ngrok running: ngrok http 8765 --host-header=rewrite");
           console.log("   3. Is the hostname correct in settings?");
+          console.log(`   4. Your hostname in settings: ${cleanIP}`);
         }
       };
 
@@ -408,19 +418,22 @@ export default function RCCarController() {
                 {piIP.includes('.ngrok') && (
                   <View style={{ marginTop: 6, gap: 2 }}>
                     <Text style={[styles.errorHint, { color: '#fca5a5', fontWeight: '700' as const }]}>
-                      Troubleshooting:
+                      🚨 CRITICAL - Follow this order:
+                    </Text>
+                    <Text style={[styles.errorHint, { color: '#fca5a5', fontWeight: '700' as const }]}>
+                      ❶ python3 raspberry-pi-server.py (FIRST!)
+                    </Text>
+                    <Text style={[styles.errorHint, { color: '#fca5a5', fontWeight: '700' as const }]}>
+                      ❷ ngrok http 8765 --host-header=rewrite (SECOND!)
                     </Text>
                     <Text style={[styles.errorHint, { color: '#fca5a5' }]}>
-                      1. Python server running: python3 raspberry-pi-server.py
+                      3. Both MUST be running on Pi
                     </Text>
                     <Text style={[styles.errorHint, { color: '#fca5a5' }]}>
-                      2. ngrok running: ngrok http 8765 --host-header=rewrite
+                      4. Wait for ngrok &quot;online&quot; status
                     </Text>
                     <Text style={[styles.errorHint, { color: '#fca5a5' }]}>
-                      3. Check ngrok shows &quot;online&quot; status
-                    </Text>
-                    <Text style={[styles.errorHint, { color: '#fca5a5' }]}>
-                      4. Try restarting both server and ngrok
+                      5. Copy ONLY hostname (no https://, no wss://)
                     </Text>
                   </View>
                 )}
@@ -474,13 +487,15 @@ export default function RCCarController() {
                 <Text style={styles.helpText}>3. Ensure both devices on same WiFi</Text>
                 <Text style={[styles.helpText, { color: '#ef4444', fontWeight: '700' as const, marginTop: 4 }]}>⚠️ Don&apos;t use localhost or 127.0.0.1 - won&apos;t work on mobile!</Text>
                 
-                <Text style={[styles.helpTitle, { marginTop: 12 }]}>Remote Access (ngrok):</Text>
-                <Text style={styles.helpText}>1. On Pi: python3 raspberry-pi-server.py</Text>
-                <Text style={[styles.helpText, { color: '#f59e0b', fontWeight: '700' as const }]}>2. New terminal: ngrok http 8765 --host-header=rewrite</Text>
+                <Text style={[styles.helpTitle, { marginTop: 12 }]}>Remote Access (ngrok) - CRITICAL ORDER:</Text>
+                <Text style={[styles.helpText, { color: '#ef4444', fontWeight: '700' as const }]}>❶ FIRST: python3 raspberry-pi-server.py</Text>
+                <Text style={[styles.helpText, { color: '#ef4444', fontWeight: '700' as const }]}>   Wait for &quot;Server is running&quot; message</Text>
+                <Text style={[styles.helpText, { color: '#f59e0b', fontWeight: '700' as const, marginTop: 4 }]}>❷ SECOND: Open NEW terminal</Text>
+                <Text style={[styles.helpText, { color: '#f59e0b', fontWeight: '700' as const }]}>   Run: ngrok http 8765 --host-header=rewrite</Text>
                 <Text style={styles.helpText}>3. Wait for &quot;Session Status: online&quot;</Text>
                 <Text style={styles.helpText}>4. Copy ONLY hostname from Forwarding line</Text>
-                <Text style={styles.helpText}>Example: abc123.ngrok-free.app</Text>
-                <Text style={[styles.helpText, { color: '#ef4444', fontWeight: '700' as const, marginTop: 4 }]}>⚠️ No https://, no ws://, no port!</Text>
+                <Text style={styles.helpText}>Example: joline-unfauceted-zayne.ngrok-free.dev</Text>
+                <Text style={[styles.helpText, { color: '#ef4444', fontWeight: '700' as const, marginTop: 4 }]}>⚠️ No https://, no ws://, no wss://, no port!</Text>
                 <Text style={[styles.helpText, { color: '#ef4444', fontWeight: '700' as const }]}>⚠️ Camera unavailable with ngrok (controls only)</Text>
               </View>
 

@@ -151,12 +151,12 @@ export default function RCCarController() {
       
       if (cleanIP.includes('.ngrok-free.dev') || cleanIP.includes('.ngrok-free.app') || cleanIP.includes('.ngrok.')) {
         cleanIP = cleanIP.replace(/:\d+$/, '');
-        url = `wss://${cleanIP}`;
+        url = `wss://${cleanIP}/ws`;
         console.log(`🔒 Detected ngrok URL, using secure WSS: ${url}`);
       } else if (cleanIP.includes(':')) {
-        url = `ws://${cleanIP}`;
+        url = `ws://${cleanIP}/ws`;
       } else {
-        url = `ws://${cleanIP}:8765`;
+        url = `ws://${cleanIP}:8765/ws`;
       }
       setConnectionAttempts(prev => {
         console.log(`🔄 Attempt ${prev + 1}: Connecting to ${url}`);

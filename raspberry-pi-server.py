@@ -131,25 +131,6 @@ class CameraStreamer:
         """Initialize camera for Raspberry Pi Camera Module 3"""
         try:
             logger.info("Initializing Raspberry Pi Camera Module 3...")
-            
-            # Check if camera is already in use
-            try:
-                test_check = subprocess.run(
-                    ['pgrep', '-f', 'qcam|libcamera-hello|rpicam'],
-                    capture_output=True,
-                    text=True
-                )
-                if test_check.returncode == 0:
-                    logger.warning("⚠️  Detected other camera processes running")
-                    logger.warning("   Attempting to stop: qcam, libcamera-hello, rpicam-*")
-                    subprocess.run(['pkill', '-f', 'qcam'], stderr=subprocess.DEVNULL)
-                    subprocess.run(['pkill', '-f', 'libcamera-hello'], stderr=subprocess.DEVNULL)
-                    subprocess.run(['pkill', '-f', 'rpicam'], stderr=subprocess.DEVNULL)
-                    time.sleep(1)
-                    logger.info("   Camera processes stopped")
-            except:
-                pass
-            
             self.camera = Picamera2()
             
             # Configure camera for streaming with MJPEG
@@ -173,15 +154,13 @@ class CameraStreamer:
             
             logger.info("✅ Camera initialized successfully (1280x720 @ 10Mbps MJPEG)")
             logger.info("✅ Pi Camera Module 3 ready for streaming")
-            logger.info(f"✅ Stream available at: http://localhost:8080/?action=stream")
         except Exception as e:
             logger.error(f"❌ Failed to initialize camera: {e}")
             logger.error("   Troubleshooting steps:")
-            logger.error("   1. Stop qcam: pkill -f qcam")
-            logger.error("   2. Stop other camera apps: pkill libcamera-hello && pkill rpicam-hello")
-            logger.error("   3. Check camera is detected: libcamera-hello --list-cameras")
-            logger.error("   4. Install packages: sudo apt install -y python3-picamera2 python3-libcamera python3-kms++")
-            logger.error("   5. Reboot Pi if needed: sudo reboot")
+            logger.error("   1. Stop other camera apps: pkill libcamera-hello && pkill rpicam-hello")
+            logger.error("   2. Check camera is detected: libcamera-hello --list-cameras")
+            logger.error("   3. Install packages: sudo apt install -y python3-picamera2 python3-libcamera")
+            logger.error("   4. Reboot Pi if needed: sudo reboot")
             self.camera = None
     
     def get_frame(self):

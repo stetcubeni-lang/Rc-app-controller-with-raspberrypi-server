@@ -930,17 +930,18 @@ function DraggableResizableCamera({
     onMoveShouldSetPanResponderCapture: () => true,
     onPanResponderTerminationRequest: () => false,
     onPanResponderGrant: () => {
-      console.log('📏 Starting resize');
+      console.log('📏 Starting resize', size);
       setIsResizing(true);
-      initialSize.current = size;
+      initialSize.current = { ...size };
     },
     onPanResponderMove: (_, gesture) => {
       const newWidth = Math.max(150, Math.min(width - 40, initialSize.current.width + gesture.dx));
       const newHeight = Math.max(100, Math.min(height - 100, initialSize.current.height + gesture.dy));
+      console.log('📏 Resizing:', { dx: gesture.dx, dy: gesture.dy, newWidth, newHeight });
       onSizeChange({ width: newWidth, height: newHeight });
     },
-    onPanResponderRelease: () => {
-      console.log('📏 Resize ended');
+    onPanResponderRelease: (_, gesture) => {
+      console.log('📏 Resize ended', { dx: gesture.dx, dy: gesture.dy });
       setIsResizing(false);
     },
   });
@@ -1036,13 +1037,12 @@ function DraggableResizableCamera({
             >
               <Maximize2 size={18} color="#1a1410" />
             </Pressable>
-            <Pressable 
+            <View 
               {...resizePanResponder.panHandlers} 
               style={styles.resizeHandle}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             >
               <View style={styles.resizeIcon} />
-            </Pressable>
+            </View>
           </View>
         </View>
         <View style={[styles.cameraView, { width: size.width, height: size.height }]}>

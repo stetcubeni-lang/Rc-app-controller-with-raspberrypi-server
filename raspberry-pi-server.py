@@ -125,30 +125,26 @@ class CameraStreamer:
         try:
             self.camera = Picamera2()
             
-            # Configure camera for streaming (optimized for Pi 5 + Camera Module 3)
+            # Configure camera for streaming
+            # Lower resolution for better performance
             config = self.camera.create_video_configuration(
-                main={"size": (1280, 720), "format": "RGB888"},
-                encode="main",
-                buffer_count=4
+                main={"size": (640, 480), "format": "RGB888"},
+                encode="main"
             )
             self.camera.configure(config)
             
             # Create output buffer
             self.output = StreamingOutput()
-            self.encoder = JpegEncoder(q=85)  # Quality 85 for better image
+            self.encoder = JpegEncoder(q=70)  # Quality 70 (0-100)
             
             # Start camera
             self.camera.start_recording(self.encoder, FileOutput(self.output))
             
-            logger.info("✅ Camera initialized successfully (1280x720, JPEG quality 85)")
-            logger.info("   Camera Module 3 detected and configured")
+            logger.info("✅ Camera initialized successfully (640x480, JPEG quality 70)")
         except Exception as e:
             logger.error(f"❌ Failed to initialize camera: {e}")
-            logger.error("   Troubleshooting:")
-            logger.error("   1. Make sure NO other app is using the camera (qcam, libcamera, etc)")
-            logger.error("   2. Run: sudo raspi-config -> Interface Options -> Legacy Camera -> DISABLE")
-            logger.error("   3. Install picamera2: sudo apt install -y python3-picamera2")
-            logger.error("   4. Reboot if you just enabled/disabled camera")
+            logger.error("   Make sure camera is enabled: sudo raspi-config")
+            logger.error("   Interface Options -> Camera -> Enable")
             self.camera = None
     
     def get_frame(self):
@@ -624,19 +620,13 @@ async def main():
     print("📹 CAMERA STREAM:")
     print("=" * 70)
     if CAMERA_AVAILABLE and camera_streamer and camera_streamer.camera:
-        print(f"   ✅ Camera Active (1280x720)")
+        print(f"   ✅ Camera Active")
         print(f"   Local: http://{local_ip}:8080/?action=stream")
         print(f"   View in browser: http://{local_ip}:8080/")
-        print(f"")
-        print(f"   📱 Paste in app settings: {local_ip}")
     else:
         print("   ❌ Camera Not Available")
-        print("   SETUP:")
-        print("   1. Close any camera apps (qcam, libcamera-hello, etc)")
-        print("   2. Install: sudo apt install -y python3-picamera2")
-        print("   3. Disable legacy camera: sudo raspi-config")
-        print("      Interface Options -> Legacy Camera -> DISABLE")
-        print("   4. Reboot and run this script again")
+        print("   Install: sudo apt install -y python3-picamera2")
+        print("   Enable: sudo raspi-config -> Interface Options -> Camera")
     print("=" * 70)
     print("")
     

@@ -39,9 +39,11 @@ export default function RCCarController() {
   const [showSettings, setShowSettings] = useState<boolean>(false);
   const [tempIP, setTempIP] = useState<string>(DEFAULT_IP);
   const [connectionAttempts, setConnectionAttempts] = useState<number>(0);
-  const [cameraPosition, setCameraPosition] = useState({ x: width - 320, y: 180 });
-  const [cameraSize, setCameraSize] = useState({ width: width * 0.65, height: width * 0.5 });
+  const [cameraPosition, setCameraPosition] = useState({ x: 20, y: 120 });
+  const [cameraSize, setCameraSize] = useState({ width: width * 0.75, height: (width * 0.75) * (9/16) });
   const [hasLoadedCameraSettings, setHasLoadedCameraSettings] = useState(false);
+  const [cameraError, setCameraError] = useState(false);
+  const [cameraKey, setCameraKey] = useState(0);
   
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -273,7 +275,7 @@ export default function RCCarController() {
     return () => {
       disconnectFromServer();
     };
-  }, [piIP]);
+  }, [piIP, isConnected, connectToServer, disconnectFromServer]);
 
   const handleSaveSettings = () => {
     const trimmedIP = tempIP.trim();
@@ -571,7 +573,7 @@ export default function RCCarController() {
         </View>
 
         <View style={styles.cameraAreaContainer}>
-          {hasLoadedCameraSettings && (
+          {hasLoadedCameraSettings && piIP && (
             <DraggableResizableCamera 
               piIP={piIP}
               position={cameraPosition}
@@ -584,6 +586,10 @@ export default function RCCarController() {
                 setCameraSize(size);
                 saveCameraSize(size);
               }}
+              cameraError={cameraError}
+              onCameraError={setCameraError}
+              cameraKey={cameraKey}
+              onRefresh={() => setCameraKey(prev => prev + 1)}
             />
           )}
         </View>
@@ -827,6 +833,10 @@ interface DraggableResizableCameraProps {
   onPositionChange: (pos: { x: number; y: number }) => void;
   size: { width: number; height: number };
   onSizeChange: (size: { width: number; height: number }) => void;
+  cameraError: boolean;
+  onCameraError: (error: boolean) => void;
+  cameraKey: number;
+  onRefresh: () => void;
 }
 
 function DraggableResizableCamera({ 
@@ -834,10 +844,17 @@ function DraggableResizableCamera({
   position, 
   onPositionChange, 
   size, 
-  onSizeChange 
+  onSizeChange,
+  cameraError,
+  onCameraError,
+  cameraKey,
+  onRefresh
 }: DraggableResizableCameraProps) {
   const pan = useRef(new Animated.ValueXY(position)).current;
   const [isResizing, setIsResizing] = useState(false);
+  const [imageLoaded, setImageLoaded] = useState(false);
+  
+  const cameraUrl = `http://${piIP.replace(/^(https?:\/\/)/i, '').replace(/^(wss?:\/\/)/i, '').replace(/\/+$/, '')}:8080/?action=stream`;
 
   const dragPanResponder = useRef(
     PanResponder.create({
@@ -910,17 +927,53 @@ function DraggableResizableCamera({
           </View>
         </View>
         <View style={[styles.cameraView, { width: size.width, height: size.height }]}>
-          <Image
-            source={{ uri: `http://${piIP}:8080/?action=stream` }}
-            style={styles.cameraImage}
-            resizeMode="cover"
-          />
-          <View style={styles.cameraOverlay}>
-            <View style={styles.cameraStatus}>
-              <View style={styles.recordingDot} />
-              <Text style={styles.recordingText}>LIVE</Text>
+          {!cameraError ? (
+            <>
+              <Image
+                key={cameraKey}
+                source={{ 
+                  uri: cameraUrl,
+                  cache: 'reload'
+                }}
+                style={styles.cameraImage}
+                resizeMode="cover"
+                onLoad={() => {
+                  setImageLoaded(true);
+                  onCameraError(false);
+                  console.log('✅ Camera stream loaded successfully');
+                }}
+                onError={(error) => {
+                  console.error('❌ Camera stream error:', error.nativeEvent.error);
+                  onCameraError(true);
+                  setImageLoaded(false);
+                }}
+              />
+              {!imageLoaded && (
+                <View style={styles.cameraLoading}>
+                  <Text style={styles.cameraLoadingText}>Loading camera...</Text>
+                </View>
+              )}
+            </>
+          ) : (
+            <View style={styles.cameraErrorView}>
+              <Text style={styles.cameraErrorText}>📹 Camera Unavailable</Text>
+              <Text style={styles.cameraErrorHint}>Make sure:</Text>
+              <Text style={styles.cameraErrorHint}>1. Python server is running</Text>
+              <Text style={styles.cameraErrorHint}>2. Camera Module 3 is connected</Text>
+              <Text style={styles.cameraErrorHint}>3. No other apps using camera</Text>
+              <Pressable onPress={onRefresh} style={styles.cameraRetryButton}>
+                <Text style={styles.cameraRetryText}>🔄 Retry</Text>
+              </Pressable>
             </View>
-          </View>
+          )}
+          {!cameraError && imageLoaded && (
+            <View style={styles.cameraOverlay}>
+              <View style={styles.cameraStatus}>
+                <View style={styles.recordingDot} />
+                <Text style={styles.recordingText}>LIVE</Text>
+              </View>
+            </View>
+          )}
         </View>
       </View>
     </Animated.View>
@@ -1328,6 +1381,53 @@ const styles = StyleSheet.create({
     padding: 4,
     backgroundColor: "rgba(245, 158, 11, 0.3)",
     borderRadius: 6,
+  },
+  cameraLoading: {
+    position: "absolute" as const,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(0, 0, 0, 0.7)",
+  },
+  cameraLoadingText: {
+    color: "#f59e0b",
+    fontSize: 14,
+    fontWeight: "600" as const,
+  },
+  cameraErrorView: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+    backgroundColor: "rgba(0, 0, 0, 0.8)",
+  },
+  cameraErrorText: {
+    color: "#ef4444",
+    fontSize: 16,
+    fontWeight: "700" as const,
+    marginBottom: 12,
+    textAlign: "center" as const,
+  },
+  cameraErrorHint: {
+    color: "#fca5a5",
+    fontSize: 11,
+    marginBottom: 4,
+    textAlign: "center" as const,
+  },
+  cameraRetryButton: {
+    marginTop: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    backgroundColor: "#f59e0b",
+    borderRadius: 8,
+  },
+  cameraRetryText: {
+    color: "#1a1410",
+    fontSize: 14,
+    fontWeight: "700" as const,
   },
 
 });

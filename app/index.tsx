@@ -164,8 +164,10 @@ export default function RCCarController() {
       } else {
         url = `ws://${cleanIP}:8765`;
       }
-      console.log(`🔄 Attempt ${connectionAttempts + 1}: Connecting to ${url}`);
-      setConnectionAttempts(prev => prev + 1);
+      setConnectionAttempts(prev => {
+        console.log(`🔄 Attempt ${prev + 1}: Connecting to ${url}`);
+        return prev + 1;
+      });
       
       const ws = new WebSocket(url);
       
@@ -209,20 +211,23 @@ export default function RCCarController() {
           setConnectionError(`Connection closed (code: ${event.code})`);
         }
         
-        if (!reconnectTimeoutRef.current && connectionAttempts < 5) {
-          const backoffDelay = Math.min(3000 + (connectionAttempts * 2000), 15000);
-          console.log(`⏳ Reconnecting in ${backoffDelay/1000}s...`);
-          reconnectTimeoutRef.current = setTimeout(() => {
-            reconnectTimeoutRef.current = null;
-            connectToServer();
-          }, backoffDelay);
-        } else if (connectionAttempts >= 5) {
-          setConnectionError("Failed after 5 attempts. Check settings and restart server.");
-          console.log("❌ Max reconnection attempts reached. Please check:");
-          console.log("   1. Is Python server running?");
-          console.log("   2. Is ngrok running with: ngrok http 8765 --host-header=rewrite");
-          console.log("   3. Is the hostname correct in settings?");
-        }
+        setConnectionAttempts(currentAttempts => {
+          if (!reconnectTimeoutRef.current && currentAttempts < 5) {
+            const backoffDelay = Math.min(3000 + (currentAttempts * 2000), 15000);
+            console.log(`⏳ Reconnecting in ${backoffDelay/1000}s...`);
+            reconnectTimeoutRef.current = setTimeout(() => {
+              reconnectTimeoutRef.current = null;
+              connectToServer();
+            }, backoffDelay);
+          } else if (currentAttempts >= 5) {
+            setConnectionError("Failed after 5 attempts. Check settings and restart server.");
+            console.log("❌ Max reconnection attempts reached. Please check:");
+            console.log("   1. Is Python server running?");
+            console.log("   2. Is ngrok running with: ngrok http 8765 --host-header=rewrite");
+            console.log("   3. Is the hostname correct in settings?");
+          }
+          return currentAttempts;
+        });
       };
 
       ws.onerror = (error: any) => {
@@ -261,7 +266,7 @@ export default function RCCarController() {
       setIsConnected(false);
       setConnectionError("Failed to create connection");
     }
-  }, [piIP, connectionAttempts]);
+  }, [piIP]);
 
   const disconnectFromServer = useCallback(() => {
     if (reconnectTimeoutRef.current) {
@@ -276,13 +281,21 @@ export default function RCCarController() {
   }, []);
 
   useEffect(() => {
-    if (piIP && !isConnected) {
+    if (piIP && !isConnected && !reconnectTimeoutRef.current) {
       connectToServer();
     }
     return () => {
-      disconnectFromServer();
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
     };
-  }, [piIP, isConnected, connectToServer, disconnectFromServer]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [piIP, connectToServer]);
 
   const handleSaveSettings = () => {
     const trimmedIP = tempIP.trim();
@@ -407,7 +420,7 @@ export default function RCCarController() {
                   </Text>
                 )}
                 {piIP.includes('.ngrok') && (
-                  <View style={{ marginTop: 6, gap: 2 }}>
+                  <View style={styles.troubleshootingContainer}>
                     <Text style={[styles.errorHint, { color: '#fca5a5', fontWeight: '700' as const }]}>
                       Troubleshooting:
                     </Text>
@@ -590,9 +603,8 @@ export default function RCCarController() {
           </View>
         </View>
 
-        <View style={styles.cameraAreaContainer}>
-          {hasLoadedCameraSettings && piIP && !isNgrokConnection && (
-            <DraggableResizableCamera 
+        {hasLoadedCameraSettings && piIP && !isNgrokConnection && (
+          <DraggableResizableCamera 
               piIP={piIP}
               position={cameraPosition}
               onPositionChange={(pos) => {
@@ -609,8 +621,7 @@ export default function RCCarController() {
               cameraKey={cameraKey}
               onRefresh={() => setCameraKey(prev => prev + 1)}
             />
-          )}
-        </View>
+        )}
 
         <View style={styles.mainControls}>
           <ThrottleSlider value={throttle} onChange={handleThrottleChange} />
@@ -882,54 +893,50 @@ function DraggableResizableCamera({
     onCameraError(false);
   }, [cameraKey, onCameraError]);
 
-  const dragPanResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => !isResizing,
-      onStartShouldSetPanResponderCapture: () => !isResizing,
-      onMoveShouldSetPanResponder: () => !isResizing,
-      onMoveShouldSetPanResponderCapture: () => !isResizing,
-      onPanResponderTerminationRequest: () => false,
-      onPanResponderGrant: () => {
-        pan.setOffset({
-          x: position.x,
-          y: position.y,
-        });
-        pan.setValue({ x: 0, y: 0 });
-      },
-      onPanResponderMove: Animated.event(
-        [null, { dx: pan.x, dy: pan.y }],
-        { useNativeDriver: false }
-      ),
-      onPanResponderRelease: (_, gesture) => {
-        pan.flattenOffset();
-        const newX = Math.max(0, Math.min(width - size.width, position.x + gesture.dx));
-        const newY = Math.max(0, Math.min(height - size.height, position.y + gesture.dy));
-        onPositionChange({ x: newX, y: newY });
-        pan.setValue({ x: newX, y: newY });
-      },
-    })
-  ).current;
+  const dragPanResponder = PanResponder.create({
+    onStartShouldSetPanResponder: () => !isResizing,
+    onStartShouldSetPanResponderCapture: () => !isResizing,
+    onMoveShouldSetPanResponder: () => !isResizing,
+    onMoveShouldSetPanResponderCapture: () => !isResizing,
+    onPanResponderTerminationRequest: () => false,
+    onPanResponderGrant: () => {
+      pan.setOffset({
+        x: position.x,
+        y: position.y,
+      });
+      pan.setValue({ x: 0, y: 0 });
+    },
+    onPanResponderMove: Animated.event(
+      [null, { dx: pan.x, dy: pan.y }],
+      { useNativeDriver: false }
+    ),
+    onPanResponderRelease: (_, gesture) => {
+      pan.flattenOffset();
+      const newX = Math.max(0, Math.min(width - size.width, position.x + gesture.dx));
+      const newY = Math.max(0, Math.min(height - size.height, position.y + gesture.dy));
+      onPositionChange({ x: newX, y: newY });
+      pan.setValue({ x: newX, y: newY });
+    },
+  });
 
-  const resizePanResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onStartShouldSetPanResponderCapture: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponderCapture: () => true,
-      onPanResponderTerminationRequest: () => false,
-      onPanResponderGrant: () => {
-        setIsResizing(true);
-      },
-      onPanResponderMove: (_, gesture) => {
-        const newWidth = Math.max(150, Math.min(width * 0.8, size.width + gesture.dx));
-        const newHeight = Math.max(100, Math.min(height * 0.6, size.height + gesture.dy));
-        onSizeChange({ width: newWidth, height: newHeight });
-      },
-      onPanResponderRelease: () => {
-        setIsResizing(false);
-      },
-    })
-  ).current;
+  const resizePanResponder = PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onStartShouldSetPanResponderCapture: () => true,
+    onMoveShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponderCapture: () => true,
+    onPanResponderTerminationRequest: () => false,
+    onPanResponderGrant: () => {
+      setIsResizing(true);
+    },
+    onPanResponderMove: (_, gesture) => {
+      const newWidth = Math.max(150, Math.min(width * 0.8, size.width + gesture.dx));
+      const newHeight = Math.max(100, Math.min(height * 0.6, size.height + gesture.dy));
+      onSizeChange({ width: newWidth, height: newHeight });
+    },
+    onPanResponderRelease: () => {
+      setIsResizing(false);
+    },
+  });
 
   return (
     <Animated.View
@@ -938,6 +945,7 @@ function DraggableResizableCamera({
         {
           left: pan.x,
           top: pan.y,
+          position: 'absolute' as const,
         },
       ]}
       {...dragPanResponder.panHandlers}
@@ -1352,12 +1360,13 @@ const styles = StyleSheet.create({
     fontWeight: "600" as const,
     letterSpacing: 1,
   },
-  cameraAreaContainer: {
-    paddingHorizontal: 20,
-    marginBottom: 20,
+  troubleshootingContainer: {
+    marginTop: 6,
+    gap: 2,
   },
   draggableCamera: {
     zIndex: 100,
+    position: "absolute" as const,
   },
   cameraContainer: {
     gap: 8,

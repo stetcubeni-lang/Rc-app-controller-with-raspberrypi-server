@@ -879,7 +879,7 @@ function DraggableResizableCamera({
   
   const isNgrok = cleanIP.includes('.ngrok-free.dev') || cleanIP.includes('.ngrok-free.app') || cleanIP.includes('.ngrok.');
   const cameraUrl = isNgrok 
-    ? `https://${cleanIP.replace(/:\d+$/, '')}`
+    ? `https://${cleanIP.replace(/:\d+$/, '')}/video_feed`
     : `http://${cleanIP.replace(/:\d+$/, '')}:8080/?action=stream`;
   
   console.log(`📹 Camera URL: ${cameraUrl}`);
@@ -919,9 +919,7 @@ function DraggableResizableCamera({
   const resizePanResponder = PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onStartShouldSetPanResponderCapture: () => true,
-    onMoveShouldSetPanResponder: (_, gesture) => {
-      return Math.abs(gesture.dx) > 2 || Math.abs(gesture.dy) > 2;
-    },
+    onMoveShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponderCapture: () => true,
     onPanResponderTerminationRequest: () => false,
     onPanResponderGrant: () => {
@@ -951,7 +949,13 @@ function DraggableResizableCamera({
           <WebView
             key={cameraKey}
             ref={webViewRef}
-            source={{ uri: cameraUrl }}
+            source={{ 
+              uri: cameraUrl,
+              headers: {
+                'ngrok-skip-browser-warning': 'true',
+                'User-Agent': 'RC-Car-App/1.0'
+              }
+            }}
             style={styles.cameraWebView}
             onLoad={() => {
               console.log('✅ Camera WebView loaded');
@@ -1007,13 +1011,14 @@ function DraggableResizableCamera({
             <Pressable 
               onPress={handleFullscreen} 
               style={styles.fullscreenButton}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
             >
-              <Maximize2 size={16} color="#f59e0b" />
+              <Maximize2 size={18} color="#1a1410" />
             </Pressable>
             <View 
               {...resizePanResponder.panHandlers} 
               style={styles.resizeHandle}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             >
               <View style={styles.resizeIcon} />
             </View>
@@ -1023,7 +1028,13 @@ function DraggableResizableCamera({
           <WebView
             key={cameraKey}
             ref={webViewRef}
-            source={{ uri: cameraUrl }}
+            source={{ 
+              uri: cameraUrl,
+              headers: {
+                'ngrok-skip-browser-warning': 'true',
+                'User-Agent': 'RC-Car-App/1.0'
+              }
+            }}
             style={styles.cameraWebView}
             pointerEvents="none"
             onLoad={() => {

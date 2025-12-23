@@ -873,6 +873,7 @@ function DraggableResizableCamera({
 }: DraggableResizableCameraProps) {
   const pan = useRef(new Animated.ValueXY(position)).current;
   const [isResizing, setIsResizing] = useState(false);
+  const [localSize, setLocalSize] = useState(size);
   const webViewRef = useRef<WebView>(null);
   
   const cleanIP = piIP.replace(/^(https?:\/\/)/i, '').replace(/^(wss?:\/\/)/i, '').replace(/\/+$/, '');
@@ -914,14 +915,18 @@ function DraggableResizableCamera({
     ),
     onPanResponderRelease: (_, gesture) => {
       pan.flattenOffset();
-      const newX = Math.max(0, Math.min(width - size.width, position.x + gesture.dx));
-      const newY = Math.max(0, Math.min(height - size.height, position.y + gesture.dy));
+      const newX = Math.max(0, Math.min(width - localSize.width, position.x + gesture.dx));
+      const newY = Math.max(0, Math.min(height - localSize.height, position.y + gesture.dy));
       onPositionChange({ x: newX, y: newY });
       pan.setValue({ x: newX, y: newY });
     },
   });
 
   const initialSize = useRef(size);
+  
+  useEffect(() => {
+    setLocalSize(size);
+  }, [size]);
   
   const resizePanResponder = PanResponder.create({
     onStartShouldSetPanResponder: () => true,
@@ -930,18 +935,22 @@ function DraggableResizableCamera({
     onMoveShouldSetPanResponderCapture: () => true,
     onPanResponderTerminationRequest: () => false,
     onPanResponderGrant: () => {
-      console.log('📏 Starting resize', size);
+      console.log('📏 Starting resize', localSize);
       setIsResizing(true);
-      initialSize.current = { ...size };
+      initialSize.current = { ...localSize };
     },
     onPanResponderMove: (_, gesture) => {
       const newWidth = Math.max(150, Math.min(width - 40, initialSize.current.width + gesture.dx));
       const newHeight = Math.max(100, Math.min(height - 100, initialSize.current.height + gesture.dy));
-      console.log('📏 Resizing:', { dx: gesture.dx, dy: gesture.dy, newWidth, newHeight });
-      onSizeChange({ width: newWidth, height: newHeight });
+      setLocalSize({ width: newWidth, height: newHeight });
     },
     onPanResponderRelease: (_, gesture) => {
-      console.log('📏 Resize ended', { dx: gesture.dx, dy: gesture.dy });
+      const finalWidth = Math.max(150, Math.min(width - 40, initialSize.current.width + gesture.dx));
+      const finalHeight = Math.max(100, Math.min(height - 100, initialSize.current.height + gesture.dy));
+      const finalSize = { width: finalWidth, height: finalHeight };
+      console.log('📏 Resize ended', finalSize);
+      setLocalSize(finalSize);
+      onSizeChange(finalSize);
       setIsResizing(false);
     },
   });
@@ -1045,7 +1054,7 @@ function DraggableResizableCamera({
             </View>
           </View>
         </View>
-        <View style={[styles.cameraView, { width: size.width, height: size.height }]}>
+        <View style={[styles.cameraView, { width: localSize.width, height: localSize.height }]}>
           {Platform.OS === 'web' ? (
             <iframe
               key={cameraKey}

@@ -36,10 +36,8 @@ export default function RCCarController() {
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [connectionError, setConnectionError] = useState<string>("");
   const [piIP, setPiIP] = useState<string>(DEFAULT_IP);
-  const [cameraIP, setCameraIP] = useState<string>("");
   const [showSettings, setShowSettings] = useState<boolean>(false);
   const [tempIP, setTempIP] = useState<string>(DEFAULT_IP);
-  const [tempCameraIP, setTempCameraIP] = useState<string>("");
   const [connectionAttempts, setConnectionAttempts] = useState<number>(0);
   const [cameraPosition, setCameraPosition] = useState({ x: 20, y: 120 });
   const [cameraSize, setCameraSize] = useState({ width: width * 0.75, height: (width * 0.75) * (9/16) });
@@ -74,12 +72,6 @@ export default function RCCarController() {
         setPiIP(savedIP);
         setTempIP(savedIP);
       }
-      const savedCameraIP = await AsyncStorage.getItem('camera_ip');
-      if (savedCameraIP) {
-        console.log(`Loaded saved camera IP: ${savedCameraIP}`);
-        setCameraIP(savedCameraIP);
-        setTempCameraIP(savedCameraIP);
-      }
     } catch (error) {
       console.error('Failed to load saved IP:', error);
     }
@@ -91,15 +83,6 @@ export default function RCCarController() {
       console.log(`Saved IP: ${ip}`);
     } catch (error) {
       console.error('Failed to save IP:', error);
-    }
-  };
-
-  const saveCameraIP = async (ip: string) => {
-    try {
-      await AsyncStorage.setItem('camera_ip', ip);
-      console.log(`Saved camera IP: ${ip}`);
-    } catch (error) {
-      console.error('Failed to save camera IP:', error);
     }
   };
 
@@ -309,12 +292,8 @@ export default function RCCarController() {
     disconnectFromServer();
     setPiIP(trimmedIP);
     saveIP(trimmedIP);
-    const trimmedCameraIP = tempCameraIP.trim();
-    setCameraIP(trimmedCameraIP);
-    saveCameraIP(trimmedCameraIP);
     setShowSettings(false);
     setConnectionAttempts(0);
-    setCameraKey(prev => prev + 1);
     
     setTimeout(() => {
       connectToServer();
@@ -447,11 +426,11 @@ export default function RCCarController() {
                 )}
               </View>
             )}
-            {isConnected && isNgrokConnection && !cameraIP && (
+            {isConnected && isNgrokConnection && (
               <View style={[styles.errorContainer, { borderColor: 'rgba(251, 191, 36, 0.4)', backgroundColor: 'rgba(251, 191, 36, 0.1)' }]}>
-                <Text style={[styles.errorText, { color: '#fbbf24' }]}>⚠️ Camera unavailable</Text>
+                <Text style={[styles.errorText, { color: '#fbbf24' }]}>⚠️ Camera not available via ngrok</Text>
                 <Text style={[styles.errorHint, { color: '#d97706' }]}>
-                  Using ngrok remotely. If on same WiFi, enter local IP in camera settings.
+                  Camera needs direct connection. Use same WiFi or setup second ngrok tunnel for port 8080.
                 </Text>
               </View>
             )}
@@ -475,26 +454,12 @@ export default function RCCarController() {
               <Text style={styles.modalTitle}>SERVER SETTINGS</Text>
               
               <View style={styles.inputContainer}>
-                <Text style={styles.inputLabel}>WebSocket Server (Controls)</Text>
+                <Text style={styles.inputLabel}>Raspberry Pi IP Address</Text>
                 <TextInput
                   style={styles.input}
                   value={tempIP}
                   onChangeText={setTempIP}
-                  placeholder="e.g. 192.168.1.100 or abc.ngrok-free.dev"
-                  placeholderTextColor="#78716c"
-                  keyboardType={Platform.OS === 'ios' ? 'numbers-and-punctuation' : 'default'}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-              </View>
-
-              <View style={styles.inputContainer}>
-                <Text style={styles.inputLabel}>Camera Server (Optional - Local IP only)</Text>
-                <TextInput
-                  style={styles.input}
-                  value={tempCameraIP}
-                  onChangeText={setTempCameraIP}
-                  placeholder="e.g. 192.168.1.100 (leave empty if same as above)"
+                  placeholder="e.g. 192.168.1.100 or 2001:db8::1"
                   placeholderTextColor="#78716c"
                   keyboardType={Platform.OS === 'ios' ? 'numbers-and-punctuation' : 'default'}
                   autoCapitalize="none"
@@ -505,17 +470,18 @@ export default function RCCarController() {
               <View style={styles.helpContainer}>
                 <Text style={styles.helpTitle}>Local Network (Same WiFi):</Text>
                 <Text style={styles.helpText}>1. On Pi, run: hostname -I</Text>
-                <Text style={styles.helpText}>2. Enter that IP in BOTH fields (e.g., 192.168.1.100)</Text>
-                <Text style={styles.helpText}>3. Leave camera field empty to use same IP</Text>
+                <Text style={styles.helpText}>2. Use that IP (e.g., 192.168.1.100)</Text>
+                <Text style={styles.helpText}>3. Ensure both devices on same WiFi</Text>
                 <Text style={[styles.helpText, { color: '#ef4444', fontWeight: '700' as const, marginTop: 4 }]}>⚠️ Don&apos;t use localhost or 127.0.0.1 - won&apos;t work on mobile!</Text>
                 
                 <Text style={[styles.helpTitle, { marginTop: 12 }]}>Remote Access (ngrok):</Text>
-                <Text style={[styles.helpText, { color: '#f59e0b', fontWeight: '700' as const }]}>On Pi terminal: ngrok http 8765 --host-header=rewrite</Text>
-                <Text style={styles.helpText}>Copy ONLY hostname (e.g., abc.ngrok-free.dev)</Text>
+                <Text style={styles.helpText}>1. On Pi: python3 raspberry-pi-server.py</Text>
+                <Text style={[styles.helpText, { color: '#f59e0b', fontWeight: '700' as const }]}>2. New terminal: ngrok http 8765 --host-header=rewrite</Text>
+                <Text style={styles.helpText}>3. Wait for &quot;Session Status: online&quot;</Text>
+                <Text style={styles.helpText}>4. Copy ONLY hostname from Forwarding line</Text>
+                <Text style={styles.helpText}>Example: abc123.ngrok-free.app</Text>
                 <Text style={[styles.helpText, { color: '#ef4444', fontWeight: '700' as const, marginTop: 4 }]}>⚠️ No https://, no ws://, no port!</Text>
-                <Text style={[styles.helpText, { color: '#10b981', fontWeight: '700' as const, marginTop: 6 }]}>📹 Camera with ngrok:</Text>
-                <Text style={styles.helpText}>If on same WiFi, enter local IP in camera field</Text>
-                <Text style={styles.helpText}>If remote, camera won&apos;t work (controls only)</Text>
+                <Text style={[styles.helpText, { color: '#ef4444', fontWeight: '700' as const }]}>⚠️ Camera unavailable with ngrok (controls only)</Text>
               </View>
 
               <View style={styles.modalButtons}>
@@ -523,7 +489,6 @@ export default function RCCarController() {
                   style={styles.modalButton}
                   onPress={() => {
                     setTempIP(piIP);
-                    setTempCameraIP(cameraIP);
                     setShowSettings(false);
                   }}
                 >
@@ -625,9 +590,9 @@ export default function RCCarController() {
         </View>
 
         <View style={styles.cameraAreaContainer}>
-          {hasLoadedCameraSettings && (cameraIP || (!isNgrokConnection && piIP)) && (
+          {hasLoadedCameraSettings && piIP && !isNgrokConnection && (
             <DraggableResizableCamera 
-              piIP={cameraIP || piIP}
+              piIP={piIP}
               position={cameraPosition}
               onPositionChange={(pos) => {
                 setCameraPosition(pos);
@@ -1010,10 +975,9 @@ function DraggableResizableCamera({
             <View style={styles.cameraErrorView}>
               <Text style={styles.cameraErrorText}>📹 Camera Unavailable</Text>
               <Text style={styles.cameraErrorHint}>Make sure:</Text>
-              <Text style={styles.cameraErrorHint}>1. Python server running: python3 raspberry-pi-server.py</Text>
-              <Text style={styles.cameraErrorHint}>2. Camera detected: libcamera-hello --list-cameras</Text>
-              <Text style={styles.cameraErrorHint}>3. Kill other apps: pkill libcamera-hello</Text>
-              <Text style={styles.cameraErrorHint}>4. Check camera IP in settings is correct</Text>
+              <Text style={styles.cameraErrorHint}>1. Python server is running</Text>
+              <Text style={styles.cameraErrorHint}>2. Camera Module 3 is connected</Text>
+              <Text style={styles.cameraErrorHint}>3. No other apps using camera</Text>
               <Pressable onPress={onRefresh} style={styles.cameraRetryButton}>
                 <Text style={styles.cameraRetryText}>🔄 Retry</Text>
               </Pressable>

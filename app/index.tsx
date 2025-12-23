@@ -876,15 +876,7 @@ function DraggableResizableCamera({
   const webViewRef = useRef<WebView>(null);
   
   const cleanIP = piIP.replace(/^(https?:\/\/)/i, '').replace(/^(wss?:\/\/)/i, '').replace(/\/+$/, '');
-  const isNgrok = cleanIP.includes('.ngrok-free.dev') || cleanIP.includes('.ngrok-free.app') || cleanIP.includes('.ngrok.') || cleanIP.includes('ngrok.io');
-  const cameraUrl = isNgrok 
-    ? `https://${cleanIP.replace(/:\d+$/, '')}/?action=stream`
-    : `http://${cleanIP.replace(/:\d+$/, '')}:8080/?action=stream`;
-  
-  const webViewHeaders = isNgrok ? {
-    'ngrok-skip-browser-warning': 'true',
-    'User-Agent': 'RCCarApp'
-  } : undefined;
+  const cameraUrl = `http://${cleanIP.replace(/:\d+$/, '')}:8080/?action=stream`;
   
   console.log(`📹 Camera URL: ${cameraUrl}`);
   
@@ -951,10 +943,7 @@ function DraggableResizableCamera({
           <WebView
             key={cameraKey}
             ref={webViewRef}
-            source={{ 
-              uri: cameraUrl,
-              headers: webViewHeaders
-            }}
+            source={{ uri: cameraUrl }}
             style={styles.cameraWebView}
             onLoad={() => {
               console.log('✅ Camera WebView loaded');
@@ -966,14 +955,12 @@ function DraggableResizableCamera({
             onError={(syntheticEvent: any) => {
               const { nativeEvent } = syntheticEvent;
               console.error('❌ Camera WebView error:', nativeEvent);
-              onCameraError(true);
             }}
             onHttpError={(syntheticEvent: any) => {
               const { nativeEvent } = syntheticEvent;
               console.error('❌ Camera HTTP error:', nativeEvent.statusCode, nativeEvent.url);
-              onCameraError(true);
             }}
-            javaScriptEnabled={false}
+            javaScriptEnabled={true}
             domStorageEnabled={false}
             startInLoadingState={false}
             scrollEnabled={false}
@@ -1028,14 +1015,10 @@ function DraggableResizableCamera({
           <WebView
             key={cameraKey}
             ref={webViewRef}
-            source={{ 
-              uri: cameraUrl,
-              headers: webViewHeaders
-            }}
+            source={{ uri: cameraUrl }}
             style={styles.cameraWebView}
             onLoad={() => {
               console.log('✅ Camera WebView loaded');
-              onCameraError(false);
             }}
             onLoadEnd={() => {
               console.log('✅ Camera stream ready');
@@ -1410,9 +1393,10 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingHorizontal: 8,
     paddingVertical: 8,
-    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    backgroundColor: "rgba(0, 0, 0, 0.8)",
     borderRadius: 8,
     marginBottom: 4,
+    zIndex: 999,
   },
   cameraHeaderLeft: {
     flexDirection: "row",
@@ -1424,6 +1408,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
+    zIndex: 1001,
   },
   cameraLabel: {
     color: "#f59e0b",
@@ -1433,11 +1418,12 @@ const styles = StyleSheet.create({
   },
   fullscreenButton: {
     padding: 8,
-    backgroundColor: "rgba(245, 158, 11, 0.8)",
+    backgroundColor: "rgba(245, 158, 11, 0.9)",
     borderRadius: 6,
+    zIndex: 1002,
   },
   cameraView: {
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    backgroundColor: "#000000",
     borderRadius: 16,
     borderWidth: 2,
     borderColor: "#f59e0b",
@@ -1447,7 +1433,7 @@ const styles = StyleSheet.create({
   cameraWebView: {
     width: "100%",
     height: "100%",
-    backgroundColor: "transparent",
+    backgroundColor: "#000000",
   },
   cameraOverlay: {
     position: "absolute" as const,
@@ -1482,8 +1468,9 @@ const styles = StyleSheet.create({
   },
   resizeHandle: {
     padding: 8,
-    backgroundColor: "rgba(245, 158, 11, 0.8)",
+    backgroundColor: "rgba(245, 158, 11, 0.9)",
     borderRadius: 6,
+    zIndex: 1002,
   },
   resizeIcon: {
     width: 12,

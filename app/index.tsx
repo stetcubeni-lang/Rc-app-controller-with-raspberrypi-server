@@ -876,7 +876,11 @@ function DraggableResizableCamera({
   const webViewRef = useRef<WebView>(null);
   
   const cleanIP = piIP.replace(/^(https?:\/\/)/i, '').replace(/^(wss?:\/\/)/i, '').replace(/\/+$/, '');
-  const cameraUrl = `http://${cleanIP.replace(/:\d+$/, '')}:8080/?action=stream`;
+  
+  const isNgrok = cleanIP.includes('.ngrok-free.dev') || cleanIP.includes('.ngrok-free.app') || cleanIP.includes('.ngrok.');
+  const cameraUrl = isNgrok 
+    ? `https://${cleanIP.replace(/:\d+$/, '')}`
+    : `http://${cleanIP.replace(/:\d+$/, '')}:8080/?action=stream`;
   
   console.log(`📹 Camera URL: ${cameraUrl}`);
   
@@ -915,10 +919,13 @@ function DraggableResizableCamera({
   const resizePanResponder = PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onStartShouldSetPanResponderCapture: () => true,
-    onMoveShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: (_, gesture) => {
+      return Math.abs(gesture.dx) > 2 || Math.abs(gesture.dy) > 2;
+    },
     onMoveShouldSetPanResponderCapture: () => true,
     onPanResponderTerminationRequest: () => false,
     onPanResponderGrant: () => {
+      console.log('📏 Starting resize');
       setIsResizing(true);
       initialSize.current = size;
     },
@@ -928,6 +935,7 @@ function DraggableResizableCamera({
       onSizeChange({ width: newWidth, height: newHeight });
     },
     onPanResponderRelease: () => {
+      console.log('📏 Resize ended');
       setIsResizing(false);
     },
   });
@@ -1017,6 +1025,7 @@ function DraggableResizableCamera({
             ref={webViewRef}
             source={{ uri: cameraUrl }}
             style={styles.cameraWebView}
+            pointerEvents="none"
             onLoad={() => {
               console.log('✅ Camera WebView loaded');
             }}
@@ -1467,17 +1476,17 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   resizeHandle: {
-    padding: 8,
+    padding: 12,
     backgroundColor: "rgba(245, 158, 11, 0.9)",
     borderRadius: 6,
     zIndex: 1002,
   },
   resizeIcon: {
-    width: 12,
-    height: 12,
+    width: 16,
+    height: 16,
     borderRightWidth: 3,
     borderBottomWidth: 3,
-    borderColor: "#f59e0b",
+    borderColor: "#1a1410",
   },
   cameraLoading: {
     position: "absolute" as const,

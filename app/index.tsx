@@ -879,9 +879,7 @@ function DraggableResizableCamera({
   const cleanIP = piIP.replace(/^(https?:\/\/)/i, '').replace(/^(wss?:\/\/)/i, '').replace(/\/+$/, '');
   
   const isNgrok = cleanIP.includes('.ngrok-free.dev') || cleanIP.includes('.ngrok-free.app') || cleanIP.includes('.ngrok.');
-  const cameraUrl = isNgrok 
-    ? `https://${cleanIP.replace(/:\d+$/, '')}/video_feed`
-    : `http://${cleanIP.replace(/:\d+$/, '')}:8080/?action=stream`;
+  const cameraUrl = `http://${cleanIP.replace(/:\d+$/, '')}:8080/?action=stream`;
   
   console.log(`📹 Camera URL: ${cameraUrl}`);
   
@@ -947,7 +945,13 @@ function DraggableResizableCamera({
     return (
       <View style={styles.fullscreenContainer}>
         <View style={styles.fullscreenCameraView}>
-          {Platform.OS === 'web' ? (
+          {isNgrok ? (
+            <View style={styles.cameraErrorView}>
+              <Text style={styles.cameraErrorText}>Camera Not Available via ngrok</Text>
+              <Text style={styles.cameraErrorHint}>Camera only works on local network</Text>
+              <Text style={styles.cameraErrorHint}>Use local IP for camera streaming</Text>
+            </View>
+          ) : Platform.OS === 'web' ? (
             <Image
               key={cameraKey}
               source={{ uri: cameraUrl }}
@@ -966,13 +970,7 @@ function DraggableResizableCamera({
             <WebView
               key={cameraKey}
               ref={webViewRef}
-              source={{ 
-                uri: cameraUrl,
-                headers: {
-                  'ngrok-skip-browser-warning': 'true',
-                  'User-Agent': 'RC-Car-App/1.0'
-                }
-              }}
+              source={{ uri: cameraUrl }}
               style={styles.cameraWebView}
               onLoad={() => {
                 console.log('✅ Camera WebView loaded');
@@ -1043,7 +1041,13 @@ function DraggableResizableCamera({
           </View>
         </View>
         <View style={[styles.cameraView, { width: size.width, height: size.height }]}>
-          {Platform.OS === 'web' ? (
+          {isNgrok ? (
+            <View style={styles.cameraErrorView}>
+              <Text style={styles.cameraErrorText}>Camera Not Available</Text>
+              <Text style={styles.cameraErrorHint}>Camera only works on local network</Text>
+              <Text style={styles.cameraErrorHint}>Switch to local IP in settings</Text>
+            </View>
+          ) : Platform.OS === 'web' ? (
             <Image
               key={cameraKey}
               source={{ uri: cameraUrl }}
@@ -1062,17 +1066,12 @@ function DraggableResizableCamera({
             <WebView
               key={cameraKey}
               ref={webViewRef}
-              source={{ 
-                uri: cameraUrl,
-                headers: {
-                  'ngrok-skip-browser-warning': 'true',
-                  'User-Agent': 'RC-Car-App/1.0'
-                }
-              }}
+              source={{ uri: cameraUrl }}
               style={styles.cameraWebView}
               pointerEvents="none"
               onLoad={() => {
                 console.log('✅ Camera WebView loaded');
+                onCameraError(false);
               }}
               onLoadEnd={() => {
                 console.log('✅ Camera stream ready');
@@ -1451,7 +1450,6 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0, 0, 0, 0.8)",
     borderRadius: 8,
     marginBottom: 4,
-    zIndex: 999,
   },
   cameraHeaderLeft: {
     flexDirection: "row",
@@ -1463,7 +1461,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    zIndex: 1001,
   },
   cameraLabel: {
     color: "#f59e0b",
@@ -1475,7 +1472,6 @@ const styles = StyleSheet.create({
     padding: 8,
     backgroundColor: "rgba(245, 158, 11, 0.9)",
     borderRadius: 6,
-    zIndex: 1002,
   },
   cameraView: {
     backgroundColor: "#000000",
@@ -1525,7 +1521,6 @@ const styles = StyleSheet.create({
     padding: 12,
     backgroundColor: "rgba(245, 158, 11, 0.9)",
     borderRadius: 6,
-    zIndex: 1002,
   },
   resizeIcon: {
     width: 16,

@@ -396,6 +396,11 @@ export default function RCCarController() {
             {!isConnected && connectionError && (
               <View style={styles.errorContainer}>
                 <Text style={styles.errorText}>{connectionError}</Text>
+                {Platform.OS === 'web' && !piIP.includes('.ngrok') && (
+                  <Text style={[styles.errorText, { color: '#fca5a5', fontWeight: '700' as const, marginTop: 4 }]}>
+                    💡 Web browsers block local IPs. Use ngrok or mobile app!
+                  </Text>
+                )}
                 <Text style={styles.errorHint}>
                   Trying: {(() => {
                     let cleanIP = piIP.trim().replace(/^(https?:\/\/)/i, '').replace(/^(wss?:\/\/)/i, '').replace(/\/+$/, '');
@@ -469,11 +474,23 @@ export default function RCCarController() {
               </View>
 
               <View style={styles.helpContainer}>
+                {Platform.OS === 'web' && (
+                  <View style={{ marginBottom: 12, padding: 8, backgroundColor: 'rgba(239, 68, 68, 0.2)', borderRadius: 6, borderWidth: 1, borderColor: '#ef4444' }}>
+                    <Text style={[styles.helpText, { color: '#fca5a5', fontWeight: '700' as const, fontSize: 12 }]}>🌐 WEB BROWSER LIMITATION</Text>
+                    <Text style={[styles.helpText, { color: '#fca5a5' }]}>Browsers block local network access for security.</Text>
+                    <Text style={[styles.helpText, { color: '#fca5a5' }]}>Solutions:</Text>
+                    <Text style={[styles.helpText, { color: '#fca5a5' }]}>• Use ngrok (remote access - works everywhere)</Text>
+                    <Text style={[styles.helpText, { color: '#fca5a5' }]}>• Scan QR code to test on mobile device</Text>
+                  </View>
+                )}
                 <Text style={styles.helpTitle}>Local Network (Same WiFi):</Text>
                 <Text style={styles.helpText}>1. On Pi, run: hostname -I</Text>
                 <Text style={styles.helpText}>2. Use that IP (e.g., 192.168.1.100)</Text>
                 <Text style={styles.helpText}>3. Ensure both devices on same WiFi</Text>
-                <Text style={[styles.helpText, { color: '#ef4444', fontWeight: '700' as const, marginTop: 4 }]}>⚠️ Don&apos;t use localhost or 127.0.0.1 - won&apos;t work on mobile!</Text>
+                <Text style={[styles.helpText, { color: '#ef4444', fontWeight: '700' as const, marginTop: 4 }]}>⚠️ Don&apos;t use localhost or 127.0.0.1 - won&apos;t work!</Text>
+                {Platform.OS === 'web' && (
+                  <Text style={[styles.helpText, { color: '#ef4444', fontWeight: '700' as const }]}>⚠️ Local IPs won&apos;t work in web browser - use ngrok!</Text>
+                )}
                 
                 <Text style={[styles.helpTitle, { marginTop: 12 }]}>Remote Access (ngrok):</Text>
                 <Text style={styles.helpText}>1. On Pi: python3 raspberry-pi-server.py</Text>

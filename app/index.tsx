@@ -148,11 +148,13 @@ export default function RCCarController() {
       cleanIP = cleanIP.replace(/\/+$/, '');
       
       let url: string;
+      const isNgrok = cleanIP.includes('.ngrok-free.dev') || cleanIP.includes('.ngrok-free.app') || cleanIP.includes('.ngrok.');
+      const isWebSecure = Platform.OS === 'web' && typeof window !== 'undefined' && window.location.protocol === 'https:';
       
-      if (cleanIP.includes('.ngrok-free.dev') || cleanIP.includes('.ngrok-free.app') || cleanIP.includes('.ngrok.')) {
+      if (isNgrok || isWebSecure) {
         cleanIP = cleanIP.replace(/:\d+$/, '');
         url = `wss://${cleanIP}/ws`;
-        console.log(`🔒 Detected ngrok URL, using secure WSS: ${url}`);
+        console.log(`🔒 Using secure WSS: ${url} (${isNgrok ? 'ngrok detected' : 'HTTPS page'})`);
       } else if (cleanIP.includes(':')) {
         url = `ws://${cleanIP}/ws`;
       } else {

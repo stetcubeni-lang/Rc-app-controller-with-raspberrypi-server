@@ -234,29 +234,21 @@ export default function RCCarController() {
       };
 
       ws.onerror = (error: any) => {
-        const errorDetails = {
-          message: error.message || 'Connection failed',
-          type: error.type || 'error',
-          url: url
-        };
-        
-        console.error(`❌ WebSocket error: ${errorDetails.type}`);
-        console.error(`   Message: ${errorDetails.message}`);
+        console.error(`❌ WebSocket error:`, error);
         console.error(`   URL: ${url}`);
         
         let errorMessage = 'Connection failed';
         if (cleanIP.includes('.ngrok')) {
-          errorMessage = 'Unable to connect to ngrok server';
-          console.error(`   💡 Troubleshooting steps:`);
-          console.error(`   1. Make sure Python server is running on Pi: python3 raspberry-pi-server.py`);
-          console.error(`   2. Check ngrok is running: ngrok http 8765 --host-header=rewrite`);
-          console.error(`   3. Verify ngrok URL in settings matches tunnel URL`);
-          console.error(`   4. Try regenerating ngrok tunnel (restart ngrok)`);
+          errorMessage = `Cannot connect via ngrok\n\n✅ RESTART THE SERVER\nThe server auto-starts ngrok - just restart it:\n\npython3 raspberry-pi-server.py\n\nThen copy the EXACT hostname from console.`;
+          console.error(`   🔧 SOLUTION: Restart the Python server`);
+          console.error(`   The server automatically handles ngrok`);
+          console.error(`   Copy the hostname from server console (no https://, wss://, or port)`);
         } else {
-          console.error(`   💡 Troubleshooting steps:`);
-          console.error(`   1. Verify Python server is running: python3 raspberry-pi-server.py`);
-          console.error(`   2. Check devices are on same WiFi network`);
-          console.error(`   3. Verify IP address is correct: hostname -I`);
+          errorMessage = `Cannot connect to ${cleanIP}\n\nMake sure:\n1. Server running: python3 raspberry-pi-server.py\n2. Same WiFi network\n3. Correct Pi IP address`;
+          console.error(`   💡 Local connection troubleshooting:`);
+          console.error(`   1. Start server: python3 raspberry-pi-server.py`);
+          console.error(`   2. Same WiFi as Pi`);
+          console.error(`   3. Use Pi IP (not 127.0.0.1)`);
         }
         
         setConnectionError(errorMessage);

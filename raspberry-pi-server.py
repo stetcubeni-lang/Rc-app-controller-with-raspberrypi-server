@@ -45,6 +45,8 @@ import subprocess
 import time
 import shutil
 import threading
+import os
+import sys
 from typing import Set
 from aiohttp import web
 
@@ -93,6 +95,79 @@ PWM_FREQUENCY = 50
 
 # Connected clients
 connected_clients: Set[web.WebSocketResponse] = set()
+
+# Live status table
+class StatusTable:
+    """Displays a static table in terminal that updates values in-place"""
+    
+    def __init__(self):
+        self.table_start_line = 0
+        self.initialized = False
+        self.lock = threading.Lock()
+        self.values = {
+            'throttle_fwd': 0.0,
+            'throttle_bwd': 0.0,
+            'steering_right': 0.0,
+            'steering_left': 0.0,
+            'brake': 0.0,
+            'lights': False,
+            'auto_mode': False,
+            'honk': False,
+            'gear': 1,
+            'clients': 0,
+            'camera': False,
+        }
+    
+    def init_table(self, camera_ok: bool):
+        """Print the initial static table"""
+        self.values['camera'] = camera_ok
+        self._draw_full_table()
+        self.initialized = True
+    
+    def _draw_full_table(self):
+        """Draw the complete table"""
+        v = self.values
+        gear_str = f"Gear {v['gear']}"
+        lines = [
+            "",
+            "\033[1;33m╔══════════════════════════════════════════════════════════╗\033[0m",
+            "\033[1;33m║          🚗  RC CAR — LIVE STATUS TABLE                  ║\033[0m",
+            "\033[1;33m╠══════════════════════════════════════════════════════════╣\033[0m",
+            "\033[1;33m║\033[0m  \033[1;36mOUTPUT              │  PIN   │  TYPE    │  VALUE\033[0m       \033[1;33m║\033[0m",
+            "\033[1;33m║\033[0m  ────────────────────┼────────┼──────────┼────────────  \033[1;33m║\033[0m",
+            f"\033[1;33m║\033[0m  Throttle Forward    │  GPIO {THROTTLE_FORWARD_PIN:<2} │  PWM      │  {v['throttle_fwd']:6.1f}%     \033[1;33m║\033[0m",
+            f"\033[1;33m║\033[0m  Throttle Backward   │  GPIO {THROTTLE_BACKWARD_PIN:<2} │  PWM      │  {v['throttle_bwd']:6.1f}%     \033[1;33m║\033[0m",
+            f"\033[1;33m║\033[0m  Steering Right      │  GPIO {STEERING_RIGHT_PIN:<2} │  PWM      │  {v['steering_right']:6.1f}%     \033[1;33m║\033[0m",
+            f"\033[1;33m║\033[0m  Steering Left       │  GPIO {STEERING_LEFT_PIN:<2} │  PWM      │  {v['steering_left']:6.1f}%     \033[1;33m║\033[0m",
+            f"\033[1;33m║\033[0m  Brake               │  GPIO {BRAKE_PIN:<2} │  PWM      │  {v['brake']:6.1f}%     \033[1;33m║\033[0m",
+            f"\033[1;33m║\033[0m  Lights              │  GPIO {LIGHTS_PIN:<2} │  Digital  │  {'  ON ✅' if v['lights'] else '  OFF   '}     \033[1;33m║\033[0m",
+            f"\033[1;33m║\033[0m  Auto Mode           │  GPIO {AUTO_PIN:<2} │  Digital  │  {'  ON ✅' if v['auto_mode'] else '  OFF   '}     \033[1;33m║\033[0m",
+            f"\033[1;33m║\033[0m  Honk                │  GPIO {HONK_PIN:<2} │  Digital  │  {'  ON 📢' if v['honk'] else '  OFF   '}     \033[1;33m║\033[0m",
+            f"\033[1;33m║\033[0m  Gear 1              │  GPIO {GEAR_1_PIN:<2} │  Digital  │  {'  ON ✅' if v['gear']==1 else '  OFF   '}     \033[1;33m║\033[0m",
+            f"\033[1;33m║\033[0m  Gear 2              │  GPIO {GEAR_2_PIN:<2} │  Digital  │  {'  ON ✅' if v['gear']==2 else '  OFF   '}     \033[1;33m║\033[0m",
+            f"\033[1;33m║\033[0m  Gear 3              │  GPIO {GEAR_3_PIN:<2} │  Digital  │  {'  ON ✅' if v['gear']==3 else '  OFF   '}     \033[1;33m║\033[0m",
+            "\033[1;33m╠══════════════════════════════════════════════════════════╣\033[0m",
+            f"\033[1;33m║\033[0m  📡 Connected Clients: {v['clients']:<3}   📹 Camera: {'✅ Active' if v['camera'] else '❌ Off':12}     \033[1;33m║\033[0m",
+            "\033[1;33m╚══════════════════════════════════════════════════════════╝\033[0m",
+            "",
+        ]
+        # Save cursor, move to table start, redraw, restore
+        total_lines = len(lines)
+        # Move cursor up to table start and redraw
+        if self.initialized:
+            sys.stdout.write(f"\033[{total_lines}A")
+        for line in lines:
+            sys.stdout.write(f"\033[2K{line}\n")
+        sys.stdout.flush()
+    
+    def update(self, key: str, value):
+        """Update a value and redraw the table"""
+        with self.lock:
+            self.values[key] = value
+            if self.initialized:
+                self._draw_full_table()
+
+status_table = StatusTable()
 
 # Camera streaming using libcamera-vid
 class CameraStreamer:
@@ -279,98 +354,66 @@ class RCCarController:
             self.gpio_chip = None
     
     def set_throttle_forward(self, percentage: float):
-        """
-        Set throttle forward PWM
-        percentage: 0 to 100 (forward direction)
-        """
-        logger.info(f"🚗 THROTTLE FORWARD: {percentage:.1f}% (Gear: {self.current_gear})")
-        
+        status_table.update('throttle_fwd', percentage)
         if GPIO_AVAILABLE and self.gpio_chip is not None:
-            # Convert percentage to PWM duty cycle (0-100)
             duty_cycle = percentage * (self.current_gear / 3)
             self.throttle_forward_duty = duty_cycle
             lgpio.tx_pwm(self.gpio_chip, THROTTLE_FORWARD_PIN, PWM_FREQUENCY, duty_cycle)
     
     def set_throttle_backward(self, percentage: float):
-        """
-        Set throttle backward PWM
-        percentage: 0 to 100 (backward direction)
-        """
-        logger.info(f"🚗 THROTTLE BACKWARD: {percentage:.1f}% (Gear: {self.current_gear})")
-        
+        status_table.update('throttle_bwd', percentage)
         if GPIO_AVAILABLE and self.gpio_chip is not None:
-            # Convert percentage to PWM duty cycle (0-100)
             duty_cycle = percentage * (self.current_gear / 3)
             self.throttle_backward_duty = duty_cycle
             lgpio.tx_pwm(self.gpio_chip, THROTTLE_BACKWARD_PIN, PWM_FREQUENCY, duty_cycle)
     
     def set_steering_right(self, percentage: float):
-        """
-        Set steering right PWM
-        percentage: 0 to 100 (right direction)
-        """
-        logger.info(f"🎯 STEERING RIGHT: {percentage:.1f}%")
-        
+        status_table.update('steering_right', percentage)
         if GPIO_AVAILABLE and self.gpio_chip is not None:
             duty_cycle = percentage
             self.steering_right_duty = duty_cycle
             lgpio.tx_pwm(self.gpio_chip, STEERING_RIGHT_PIN, PWM_FREQUENCY, duty_cycle)
     
     def set_steering_left(self, percentage: float):
-        """
-        Set steering left PWM
-        percentage: 0 to 100 (left direction)
-        """
-        logger.info(f"🎯 STEERING LEFT: {percentage:.1f}%")
-        
+        status_table.update('steering_left', percentage)
         if GPIO_AVAILABLE and self.gpio_chip is not None:
             duty_cycle = percentage
             self.steering_left_duty = duty_cycle
             lgpio.tx_pwm(self.gpio_chip, STEERING_LEFT_PIN, PWM_FREQUENCY, duty_cycle)
     
     def set_gear(self, gear: int):
-        """Set gear (1, 2, or 3)"""
         if 1 <= gear <= 3:
             self.current_gear = gear
+            status_table.update('gear', gear)
             if GPIO_AVAILABLE and self.gpio_chip is not None:
                 lgpio.gpio_write(self.gpio_chip, GEAR_1_PIN, 1 if gear == 1 else 0)
                 lgpio.gpio_write(self.gpio_chip, GEAR_2_PIN, 1 if gear == 2 else 0)
                 lgpio.gpio_write(self.gpio_chip, GEAR_3_PIN, 1 if gear == 3 else 0)
-            logger.info(f"⚙️  GEAR: {gear}")
     
     def set_lights(self, on: bool):
-        """Toggle lights"""
         self.lights_on = on
+        status_table.update('lights', on)
         if GPIO_AVAILABLE and self.gpio_chip is not None:
             lgpio.gpio_write(self.gpio_chip, LIGHTS_PIN, 1 if on else 0)
-        logger.info(f"💡 LIGHTS: {'ON' if on else 'OFF'}")
     
     def set_auto_mode(self, on: bool):
-        """Toggle auto mode"""
         self.auto_mode = on
+        status_table.update('auto_mode', on)
         if GPIO_AVAILABLE and self.gpio_chip is not None:
             lgpio.gpio_write(self.gpio_chip, AUTO_PIN, 1 if on else 0)
-        logger.info(f"🤖 AUTO MODE: {'ON' if on else 'OFF'}")
     
     def set_brake(self, percentage: float):
-        """
-        Set brake PWM
-        percentage: 0 (no brake) to 100 (full brake)
-        """
-        logger.info(f"🛑 BRAKE: {percentage:.1f}%")
-        
+        status_table.update('brake', percentage)
         if GPIO_AVAILABLE and self.gpio_chip is not None:
-            # Convert percentage to PWM duty cycle
             duty_cycle = (percentage / 100) * 100
             self.brake_duty = duty_cycle
             lgpio.tx_pwm(self.gpio_chip, BRAKE_PIN, PWM_FREQUENCY, duty_cycle)
     
     def set_honk(self, active: bool):
-        """Toggle honk"""
         self.honk_active = active
+        status_table.update('honk', active)
         if GPIO_AVAILABLE and self.gpio_chip is not None:
             lgpio.gpio_write(self.gpio_chip, HONK_PIN, 1 if active else 0)
-        logger.info(f"📢 HONK: {'ON' if active else 'OFF'}")
     
     def cleanup(self):
         """Cleanup GPIO resources"""
@@ -411,8 +454,8 @@ async def websocket_handler(request):
     await ws.prepare(request)
     
     client_address = request.remote
-    logger.info(f"✅ Client connected: {client_address}")
     connected_clients.add(ws)
+    status_table.update('clients', len(connected_clients))
     
     try:
         async for msg in ws:
@@ -460,8 +503,8 @@ async def websocket_handler(request):
             elif msg.type == web.WSMsgType.ERROR:
                 logger.error(f'WebSocket error: {ws.exception()}')
     finally:
-        logger.info(f"❌ Client disconnected: {client_address}")
         connected_clients.discard(ws)
+        status_table.update('clients', len(connected_clients))
         rc_car.set_throttle_forward(0)
         rc_car.set_throttle_backward(0)
         rc_car.set_steering_right(0)
@@ -764,7 +807,10 @@ async def main():
         logger.warning("⚠️  Running in SIMULATION MODE (no GPIO)")
         logger.warning("⚠️  Install lgpio for actual hardware control: pip install lgpio")
     
-    logger.info("\n✅ Server is running. Waiting for connections...\n")
+    logging.disable(logging.CRITICAL)
+    
+    camera_ok = CAMERA_AVAILABLE and camera_streamer and camera_streamer.camera_process is not None
+    status_table.init_table(camera_ok)
     
     # Keep server running
     try:

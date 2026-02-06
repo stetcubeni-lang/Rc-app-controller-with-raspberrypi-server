@@ -148,8 +148,17 @@ export default function RCCarController() {
       cleanIP = cleanIP.replace(/\/+$/, '');
       
       let url: string;
+      const isNgrok = cleanIP.includes('.ngrok-free.dev') || cleanIP.includes('.ngrok-free.app') || cleanIP.includes('.ngrok.');
       
-      if (cleanIP.includes('.ngrok-free.dev') || cleanIP.includes('.ngrok-free.app') || cleanIP.includes('.ngrok.')) {
+      if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location.protocol === 'https:') {
+        if (!isNgrok) {
+          setConnectionError("Web app on HTTPS requires ngrok URL (not local IP). Use ngrok or scan QR code with mobile device.");
+          console.error('❌ Cannot use local IP on web HTTPS. Use ngrok URL or access via mobile app.');
+          return;
+        }
+      }
+      
+      if (isNgrok) {
         cleanIP = cleanIP.replace(/:\d+$/, '');
         url = `wss://${cleanIP}/ws`;
         console.log(`🔒 Detected ngrok URL, using secure WSS: ${url}`);

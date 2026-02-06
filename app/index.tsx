@@ -12,7 +12,6 @@ import {
   PanResponder,
 } from "react-native";
 import { WebView } from 'react-native-webview';
-import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import { LinearGradient } from "expo-linear-gradient";
 import { Zap, Video, Settings as SettingsIcon, Maximize2 } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -651,60 +650,42 @@ interface SliderProps {
 function ThrottleSlider({ value, onChange }: SliderProps) {
   const sliderHeight = height * 0.45;
   const sliderRef = useRef<View>(null);
-  const sliderBounds = useRef({ x: 0, y: 0, width: 60, height: sliderHeight });
-  const startY = useRef(0);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
-  const panGesture = Gesture.Pan()
-    .runOnJS(true)
-    .onBegin((event) => {
-      startY.current = event.y;
-      const y = event.y;
-      const percentage = Math.max(
-        -100,
-        Math.min(100, ((sliderHeight / 2 - y) / (sliderHeight / 2)) * 100)
-      );
-      onChange(percentage);
-      console.log(`[Throttle] Gesture started`);
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (evt) => {
+        const y = evt.nativeEvent.locationY;
+        const pct = Math.max(-100, Math.min(100, ((sliderHeight / 2 - y) / (sliderHeight / 2)) * 100));
+        onChangeRef.current(pct);
+      },
+      onPanResponderMove: (evt) => {
+        const y = evt.nativeEvent.locationY;
+        const pct = Math.max(-100, Math.min(100, ((sliderHeight / 2 - y) / (sliderHeight / 2)) * 100));
+        onChangeRef.current(pct);
+      },
+      onPanResponderRelease: () => { onChangeRef.current(0); },
+      onPanResponderTerminate: () => { onChangeRef.current(0); },
     })
-    .onUpdate((event) => {
-      const y = event.y;
-      const percentage = Math.max(
-        -100,
-        Math.min(100, ((sliderHeight / 2 - y) / (sliderHeight / 2)) * 100)
-      );
-      onChange(percentage);
-    })
-    .onEnd(() => {
-      console.log(`[Throttle] Gesture ended`);
-      onChange(0);
-    })
-    .onFinalize(() => {
-      onChange(0);
-    });
+  ).current;
 
   return (
     <View style={styles.throttleContainer}>
       <Text style={styles.sliderLabel}>THROTTLE</Text>
-      <GestureDetector gesture={panGesture}>
-        <View
-          ref={sliderRef}
-          style={[styles.verticalSlider, { height: sliderHeight }]}
-          onLayout={(event) => {
-            sliderRef.current?.measureInWindow((pageX, pageY) => {
-              sliderBounds.current = { x: pageX, y: pageY, width: 60, height: sliderHeight };
-              console.log(`[Throttle] Layout bounds:`, sliderBounds.current);
-            });
-          }}
-        >
+      <View
+        ref={sliderRef}
+        style={[styles.verticalSlider, { height: sliderHeight }]}
+        {...panResponder.panHandlers}
+      >
         <View style={styles.sliderCenter} />
         <View
           pointerEvents="none"
           style={[
             styles.sliderThumb,
-            {
-              top:
-                sliderHeight / 2 - (value / 100) * (sliderHeight / 2) - 20,
-            },
+            { top: sliderHeight / 2 - (value / 100) * (sliderHeight / 2) - 20 },
           ]}
         >
           <LinearGradient
@@ -712,8 +693,7 @@ function ThrottleSlider({ value, onChange }: SliderProps) {
             style={styles.thumbGradient}
           />
         </View>
-        </View>
-      </GestureDetector>
+      </View>
       <View style={styles.sliderLabels}>
         <Text style={styles.sliderLabelText}>FWD</Text>
         <Text style={styles.sliderLabelText}>BWD</Text>
@@ -724,66 +704,40 @@ function ThrottleSlider({ value, onChange }: SliderProps) {
 
 function BrakeSlider({ value, onChange }: SliderProps) {
   const sliderWidth = width * 0.45;
-  const sliderRef = useRef<View>(null);
-  const sliderBounds = useRef({ x: 0, y: 0, width: sliderWidth, height: 60 });
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
-  const panGesture = Gesture.Pan()
-    .runOnJS(true)
-    .onBegin((event) => {
-      const x = event.x;
-      const percentage = Math.max(
-        0,
-        Math.min(100, (x / sliderWidth) * 100)
-      );
-      onChange(percentage);
-      console.log(`[Brake] Gesture started`);
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (evt) => {
+        const x = evt.nativeEvent.locationX;
+        onChangeRef.current(Math.max(0, Math.min(100, (x / sliderWidth) * 100)));
+      },
+      onPanResponderMove: (evt) => {
+        const x = evt.nativeEvent.locationX;
+        onChangeRef.current(Math.max(0, Math.min(100, (x / sliderWidth) * 100)));
+      },
+      onPanResponderRelease: () => { onChangeRef.current(0); },
+      onPanResponderTerminate: () => { onChangeRef.current(0); },
     })
-    .onUpdate((event) => {
-      const x = event.x;
-      const percentage = Math.max(
-        0,
-        Math.min(100, (x / sliderWidth) * 100)
-      );
-      onChange(percentage);
-    })
-    .onEnd(() => {
-      console.log(`[Brake] Gesture ended`);
-      onChange(0);
-    })
-    .onFinalize(() => {
-      onChange(0);
-    });
+  ).current;
 
   return (
     <View style={styles.brakeContainer}>
       <Text style={styles.sliderLabel}>BRAKE</Text>
-      <GestureDetector gesture={panGesture}>
-        <View
-          ref={sliderRef}
-          style={[styles.horizontalSlider, { width: sliderWidth }]}
-          onLayout={(event) => {
-            sliderRef.current?.measureInWindow((pageX, pageY) => {
-              sliderBounds.current = { x: pageX, y: pageY, width: sliderWidth, height: 60 };
-              console.log(`[Brake] Layout bounds:`, sliderBounds.current);
-            });
-          }}
-        >
+      <View
+        style={[styles.horizontalSlider, { width: sliderWidth }]}
+        {...panResponder.panHandlers}
+      >
         <View
           pointerEvents="none"
-          style={[
-            styles.sliderThumb,
-            {
-              left: (value / 100) * sliderWidth - 20,
-            },
-          ]}
+          style={[styles.sliderThumb, { left: (value / 100) * sliderWidth - 20 }]}
         >
-          <LinearGradient
-            colors={["#ef4444", "#dc2626"]}
-            style={styles.thumbGradient}
-          />
+          <LinearGradient colors={["#ef4444", "#dc2626"]} style={styles.thumbGradient} />
         </View>
-        </View>
-      </GestureDetector>
+      </View>
       <View style={styles.sliderLabelsHorizontal}>
         <Text style={styles.sliderLabelText}>0%</Text>
         <Text style={styles.sliderLabelText}>100%</Text>
@@ -794,73 +748,73 @@ function BrakeSlider({ value, onChange }: SliderProps) {
 
 function SteeringSlider({ value, onChange }: SliderProps) {
   const sliderWidth = width * 0.45;
-  const sliderRef = useRef<View>(null);
-  const sliderBounds = useRef({ x: 0, y: 0, width: sliderWidth, height: 60 });
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
-  const panGesture = Gesture.Pan()
-    .runOnJS(true)
-    .onBegin((event) => {
-      const x = event.x;
-      const percentage = Math.max(
-        -100,
-        Math.min(100, ((x - sliderWidth / 2) / (sliderWidth / 2)) * 100)
-      );
-      onChange(percentage);
-      console.log(`[Steering] Gesture started`);
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (evt) => {
+        const x = evt.nativeEvent.locationX;
+        onChangeRef.current(Math.max(-100, Math.min(100, ((x - sliderWidth / 2) / (sliderWidth / 2)) * 100)));
+      },
+      onPanResponderMove: (evt) => {
+        const x = evt.nativeEvent.locationX;
+        onChangeRef.current(Math.max(-100, Math.min(100, ((x - sliderWidth / 2) / (sliderWidth / 2)) * 100)));
+      },
+      onPanResponderRelease: () => { onChangeRef.current(0); },
+      onPanResponderTerminate: () => { onChangeRef.current(0); },
     })
-    .onUpdate((event) => {
-      const x = event.x;
-      const percentage = Math.max(
-        -100,
-        Math.min(100, ((x - sliderWidth / 2) / (sliderWidth / 2)) * 100)
-      );
-      onChange(percentage);
-    })
-    .onEnd(() => {
-      console.log(`[Steering] Gesture ended`);
-      onChange(0);
-    })
-    .onFinalize(() => {
-      onChange(0);
-    });
+  ).current;
 
   return (
     <View style={styles.steeringContainer}>
       <Text style={styles.sliderLabel}>STEERING</Text>
-      <GestureDetector gesture={panGesture}>
-        <View
-          ref={sliderRef}
-          style={[styles.horizontalSlider, { width: sliderWidth }]}
-          onLayout={(event) => {
-            sliderRef.current?.measureInWindow((pageX, pageY) => {
-              sliderBounds.current = { x: pageX, y: pageY, width: sliderWidth, height: 60 };
-              console.log(`[Steering] Layout bounds:`, sliderBounds.current);
-            });
-          }}
-        >
+      <View
+        style={[styles.horizontalSlider, { width: sliderWidth }]}
+        {...panResponder.panHandlers}
+      >
         <View style={styles.sliderCenter} />
         <View
           pointerEvents="none"
           style={[
             styles.sliderThumb,
-            {
-              left: sliderWidth / 2 + (value / 100) * (sliderWidth / 2) - 20,
-            },
+            { left: sliderWidth / 2 + (value / 100) * (sliderWidth / 2) - 20 },
           ]}
         >
-          <LinearGradient
-            colors={["#f59e0b", "#d97706"]}
-            style={styles.thumbGradient}
-          />
+          <LinearGradient colors={["#f59e0b", "#d97706"]} style={styles.thumbGradient} />
         </View>
-        </View>
-      </GestureDetector>
+      </View>
       <View style={styles.sliderLabelsHorizontal}>
         <Text style={styles.sliderLabelText}>LEFT</Text>
         <Text style={styles.sliderLabelText}>RIGHT</Text>
       </View>
     </View>
   );
+}
+
+function WebCameraView({ url, cameraKey }: { url: string; cameraKey: number }) {
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  useEffect(() => {
+    if (iframeRef.current) {
+      iframeRef.current.src = url;
+    }
+  }, [url, cameraKey]);
+
+  return React.createElement('iframe', {
+    ref: iframeRef,
+    src: url,
+    key: cameraKey,
+    style: {
+      width: '100%',
+      height: '100%',
+      border: 'none',
+      backgroundColor: '#000000',
+    },
+    allow: 'autoplay',
+  });
 }
 
 interface DraggableResizableCameraProps {
@@ -983,17 +937,7 @@ function DraggableResizableCamera({
       <View style={styles.fullscreenContainer}>
         <View style={styles.fullscreenCameraView}>
           {Platform.OS === 'web' ? (
-            <iframe
-              key={cameraKey}
-              src={cameraUrl}
-              style={{
-                width: '100%',
-                height: '100%',
-                border: 'none',
-                backgroundColor: '#000000',
-              }}
-              allow="autoplay"
-            />
+            <WebCameraView url={cameraUrl} cameraKey={cameraKey} />
           ) : (
             <WebView
               key={cameraKey}
@@ -1075,17 +1019,7 @@ function DraggableResizableCamera({
         </View>
         <View style={[styles.cameraView, { width: localSize.width, height: localSize.height }]}>
           {Platform.OS === 'web' ? (
-            <iframe
-              key={cameraKey}
-              src={cameraUrl}
-              style={{
-                width: '100%',
-                height: '100%',
-                border: 'none',
-                backgroundColor: '#000000',
-              }}
-              allow="autoplay"
-            />
+            <WebCameraView url={cameraUrl} cameraKey={cameraKey} />
           ) : (
             <WebView
               key={cameraKey}

@@ -654,11 +654,40 @@ async def main():
     """Start combined HTTP/WebSocket server"""
     # Get local IP address
     import socket
-    hostname = socket.gethostname()
-    try:
-        local_ip = socket.gethostbyname(hostname)
-    except:
-        local_ip = "unknown"
+    
+    def get_local_ip():
+        """Get the actual local network IP address (not localhost)"""
+        try:
+            # Create a socket to determine local IP
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(0)
+            try:
+                # Connect to external address (doesn't actually send data)
+                s.connect(('10.254.254.254', 1))
+                local_ip = s.getsockname()[0]
+            except Exception:
+                # Fallback: try to get from hostname
+                hostname = socket.gethostname()
+                local_ip = socket.gethostbyname(hostname)
+                # If we got localhost, try another method
+                if local_ip.startswith('127.'):
+                    # Get all network interfaces
+                    import subprocess
+                    result = subprocess.run(['hostname', '-I'], capture_output=True, text=True)
+                    if result.returncode == 0 and result.stdout.strip():
+                        # Get first non-localhost IP
+                        ips = result.stdout.strip().split()
+                        for ip in ips:
+                            if not ip.startswith('127.') and ':' not in ip:  # Avoid IPv6
+                                return ip
+            finally:
+                s.close()
+            return local_ip
+        except Exception as e:
+            logger.error(f"Failed to get local IP: {e}")
+            return "unknown"
+    
+    local_ip = get_local_ip()
     
     # Start combined server
     runner = await start_combined_server()

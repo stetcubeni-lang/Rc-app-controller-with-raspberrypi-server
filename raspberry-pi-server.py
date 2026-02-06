@@ -407,16 +407,7 @@ rc_car = RCCarController()
 
 async def websocket_handler(request):
     """Handle WebSocket client connection using aiohttp"""
-    ws = web.WebSocketResponse(
-        heartbeat=30,
-        receive_timeout=60
-    )
-    
-    # Check if this is a proper WebSocket upgrade request
-    if not ws.can_prepare(request):
-        logger.error(f"❌ Invalid WebSocket request from {request.remote}")
-        return web.Response(status=400, text="Expected WebSocket request")
-    
+    ws = web.WebSocketResponse()
     await ws.prepare(request)
     
     client_address = request.remote
@@ -598,29 +589,9 @@ async def root_handler(request):
     """
     return web.Response(text=html, content_type='text/html')
 
-@web.middleware
-async def cors_middleware(request, handler):
-    """Add CORS headers to all responses"""
-    # Handle preflight OPTIONS requests
-    if request.method == 'OPTIONS':
-        response = web.Response()
-    else:
-        try:
-            response = await handler(request)
-        except web.HTTPException as ex:
-            response = ex
-    
-    # Add CORS headers
-    response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
-    response.headers['Access-Control-Allow-Headers'] = '*'
-    response.headers['Access-Control-Allow-Credentials'] = 'true'
-    
-    return response
-
 async def start_combined_server():
     """Start combined HTTP/WebSocket server on port 8765"""
-    app = web.Application(middlewares=[cors_middleware])
+    app = web.Application()
     app.router.add_get('/camera', stream_handler)
     app.router.add_get('/camera-info', root_handler)
     app.router.add_get('/ws', websocket_handler)

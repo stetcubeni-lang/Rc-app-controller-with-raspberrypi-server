@@ -47,6 +47,8 @@ import shutil
 import threading
 import os
 import sys
+import tkinter as tk
+from tkinter import ttk
 from typing import Set
 from aiohttp import web
 
@@ -96,14 +98,16 @@ PWM_FREQUENCY = 50
 # Connected clients
 connected_clients: Set[web.WebSocketResponse] = set()
 
-# Live status table
+# Live status table with Tkinter GUI
 class StatusTable:
-    """Displays a static table in terminal that updates values in-place"""
+    """Displays a Tkinter window with a live-updating status table"""
     
     def __init__(self):
-        self.table_start_line = 0
         self.initialized = False
         self.lock = threading.Lock()
+        self.root = None
+        self.value_labels = {}
+        self.info_label = None
         self.values = {
             'throttle_fwd': 0.0,
             'throttle_bwd': 0.0,
@@ -117,55 +121,183 @@ class StatusTable:
             'clients': 0,
             'camera': False,
         }
+        self.server_info = {}
+        self._gui_thread = None
     
-    def init_table(self, camera_ok: bool):
-        """Print the initial static table"""
+    def init_table(self, camera_ok: bool, server_info: dict = None):
+        """Start the Tkinter GUI in a separate thread"""
         self.values['camera'] = camera_ok
-        self._draw_full_table()
+        if server_info:
+            self.server_info = server_info
+        self._gui_thread = threading.Thread(target=self._run_gui, daemon=True)
+        self._gui_thread.start()
         self.initialized = True
     
-    def _draw_full_table(self):
-        """Draw the complete table"""
-        v = self.values
-        gear_str = f"Gear {v['gear']}"
-        lines = [
-            "",
-            "\033[1;33m╔══════════════════════════════════════════════════════════╗\033[0m",
-            "\033[1;33m║          🚗  RC CAR — LIVE STATUS TABLE                  ║\033[0m",
-            "\033[1;33m╠══════════════════════════════════════════════════════════╣\033[0m",
-            "\033[1;33m║\033[0m  \033[1;36mOUTPUT              │  PIN   │  TYPE    │  VALUE\033[0m       \033[1;33m║\033[0m",
-            "\033[1;33m║\033[0m  ────────────────────┼────────┼──────────┼────────────  \033[1;33m║\033[0m",
-            f"\033[1;33m║\033[0m  Throttle Forward    │  GPIO {THROTTLE_FORWARD_PIN:<2} │  PWM      │  {v['throttle_fwd']:6.1f}%     \033[1;33m║\033[0m",
-            f"\033[1;33m║\033[0m  Throttle Backward   │  GPIO {THROTTLE_BACKWARD_PIN:<2} │  PWM      │  {v['throttle_bwd']:6.1f}%     \033[1;33m║\033[0m",
-            f"\033[1;33m║\033[0m  Steering Right      │  GPIO {STEERING_RIGHT_PIN:<2} │  PWM      │  {v['steering_right']:6.1f}%     \033[1;33m║\033[0m",
-            f"\033[1;33m║\033[0m  Steering Left       │  GPIO {STEERING_LEFT_PIN:<2} │  PWM      │  {v['steering_left']:6.1f}%     \033[1;33m║\033[0m",
-            f"\033[1;33m║\033[0m  Brake               │  GPIO {BRAKE_PIN:<2} │  PWM      │  {v['brake']:6.1f}%     \033[1;33m║\033[0m",
-            f"\033[1;33m║\033[0m  Lights              │  GPIO {LIGHTS_PIN:<2} │  Digital  │  {'  ON ✅' if v['lights'] else '  OFF   '}     \033[1;33m║\033[0m",
-            f"\033[1;33m║\033[0m  Auto Mode           │  GPIO {AUTO_PIN:<2} │  Digital  │  {'  ON ✅' if v['auto_mode'] else '  OFF   '}     \033[1;33m║\033[0m",
-            f"\033[1;33m║\033[0m  Honk                │  GPIO {HONK_PIN:<2} │  Digital  │  {'  ON 📢' if v['honk'] else '  OFF   '}     \033[1;33m║\033[0m",
-            f"\033[1;33m║\033[0m  Gear 1              │  GPIO {GEAR_1_PIN:<2} │  Digital  │  {'  ON ✅' if v['gear']==1 else '  OFF   '}     \033[1;33m║\033[0m",
-            f"\033[1;33m║\033[0m  Gear 2              │  GPIO {GEAR_2_PIN:<2} │  Digital  │  {'  ON ✅' if v['gear']==2 else '  OFF   '}     \033[1;33m║\033[0m",
-            f"\033[1;33m║\033[0m  Gear 3              │  GPIO {GEAR_3_PIN:<2} │  Digital  │  {'  ON ✅' if v['gear']==3 else '  OFF   '}     \033[1;33m║\033[0m",
-            "\033[1;33m╠══════════════════════════════════════════════════════════╣\033[0m",
-            f"\033[1;33m║\033[0m  📡 Connected Clients: {v['clients']:<3}   📹 Camera: {'✅ Active' if v['camera'] else '❌ Off':12}     \033[1;33m║\033[0m",
-            "\033[1;33m╚══════════════════════════════════════════════════════════╝\033[0m",
-            "",
+    def _run_gui(self):
+        """Create and run the Tkinter window"""
+        self.root = tk.Tk()
+        self.root.title("RC Car Server — Live Status")
+        self.root.configure(bg='#1a1410')
+        self.root.geometry('680x780')
+        self.root.resizable(True, True)
+
+        style = ttk.Style(self.root)
+        style.theme_use('clam')
+        style.configure('Dark.TFrame', background='#1a1410')
+        style.configure('Header.TLabel', background='#1a1410', foreground='#f59e0b',
+                        font=('Consolas', 16, 'bold'))
+        style.configure('SubHeader.TLabel', background='#1a1410', foreground='#fbbf24',
+                        font=('Consolas', 11, 'bold'))
+        style.configure('Cell.TLabel', background='#262016', foreground='#e2e8f0',
+                        font=('Consolas', 10), padding=(8, 4))
+        style.configure('CellHeader.TLabel', background='#332b1a', foreground='#f59e0b',
+                        font=('Consolas', 10, 'bold'), padding=(8, 4))
+        style.configure('ValueOn.TLabel', background='#262016', foreground='#22c55e',
+                        font=('Consolas', 10, 'bold'), padding=(8, 4))
+        style.configure('ValueOff.TLabel', background='#262016', foreground='#94a3b8',
+                        font=('Consolas', 10), padding=(8, 4))
+        style.configure('Info.TLabel', background='#1a1410', foreground='#94a3b8',
+                        font=('Consolas', 9))
+        style.configure('InfoHighlight.TLabel', background='#1a1410', foreground='#38bdf8',
+                        font=('Consolas', 10, 'bold'))
+        style.configure('Status.TLabel', background='#1a1410', foreground='#fbbf24',
+                        font=('Consolas', 11))
+
+        main_frame = ttk.Frame(self.root, style='Dark.TFrame')
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=16, pady=12)
+
+        ttk.Label(main_frame, text='\U0001F697  RC CAR — LIVE STATUS', style='Header.TLabel').pack(pady=(0, 10))
+
+        # --- GPIO Table ---
+        ttk.Label(main_frame, text='GPIO Outputs', style='SubHeader.TLabel').pack(anchor='w', pady=(4, 2))
+        table_frame = ttk.Frame(main_frame, style='Dark.TFrame')
+        table_frame.pack(fill=tk.X, pady=(0, 8))
+
+        headers = ['Output', 'Pin', 'Type', 'Value']
+        for col, h in enumerate(headers):
+            lbl = ttk.Label(table_frame, text=h, style='CellHeader.TLabel')
+            lbl.grid(row=0, column=col, sticky='nsew', padx=1, pady=1)
+
+        rows = [
+            ('Throttle Forward',  f'GPIO {THROTTLE_FORWARD_PIN}',  'PWM',     'throttle_fwd'),
+            ('Throttle Backward', f'GPIO {THROTTLE_BACKWARD_PIN}', 'PWM',     'throttle_bwd'),
+            ('Steering Right',    f'GPIO {STEERING_RIGHT_PIN}',    'PWM',     'steering_right'),
+            ('Steering Left',     f'GPIO {STEERING_LEFT_PIN}',     'PWM',     'steering_left'),
+            ('Brake',             f'GPIO {BRAKE_PIN}',             'PWM',     'brake'),
+            ('Lights',            f'GPIO {LIGHTS_PIN}',            'Digital', 'lights'),
+            ('Auto Mode',         f'GPIO {AUTO_PIN}',              'Digital', 'auto_mode'),
+            ('Honk',              f'GPIO {HONK_PIN}',              'Digital', 'honk'),
+            ('Gear 1',            f'GPIO {GEAR_1_PIN}',            'Digital', 'gear_1'),
+            ('Gear 2',            f'GPIO {GEAR_2_PIN}',            'Digital', 'gear_2'),
+            ('Gear 3',            f'GPIO {GEAR_3_PIN}',            'Digital', 'gear_3'),
         ]
-        # Save cursor, move to table start, redraw, restore
-        total_lines = len(lines)
-        # Move cursor up to table start and redraw
-        if self.initialized:
-            sys.stdout.write(f"\033[{total_lines}A")
-        for line in lines:
-            sys.stdout.write(f"\033[2K{line}\n")
-        sys.stdout.flush()
-    
+
+        for i, (name, pin, typ, key) in enumerate(rows, start=1):
+            ttk.Label(table_frame, text=name, style='Cell.TLabel').grid(row=i, column=0, sticky='nsew', padx=1, pady=1)
+            ttk.Label(table_frame, text=pin,  style='Cell.TLabel').grid(row=i, column=1, sticky='nsew', padx=1, pady=1)
+            ttk.Label(table_frame, text=typ,  style='Cell.TLabel').grid(row=i, column=2, sticky='nsew', padx=1, pady=1)
+            val_lbl = ttk.Label(table_frame, text=self._format_value(key), style='ValueOff.TLabel')
+            val_lbl.grid(row=i, column=3, sticky='nsew', padx=1, pady=1)
+            self.value_labels[key] = val_lbl
+
+        for col in range(4):
+            table_frame.columnconfigure(col, weight=1)
+
+        # --- Status Bar ---
+        ttk.Label(main_frame, text='Server Status', style='SubHeader.TLabel').pack(anchor='w', pady=(10, 2))
+        self.status_label = ttk.Label(main_frame, text=self._format_status(), style='Status.TLabel')
+        self.status_label.pack(anchor='w', pady=(0, 8))
+
+        # --- Server Info ---
+        ttk.Label(main_frame, text='Connection Info', style='SubHeader.TLabel').pack(anchor='w', pady=(6, 2))
+        self.info_label = ttk.Label(main_frame, text=self._format_server_info(), style='Info.TLabel',
+                                     justify=tk.LEFT, wraplength=640)
+        self.info_label.pack(anchor='w', pady=(0, 4))
+
+        if self.server_info.get('local_ip'):
+            ip_frame = ttk.Frame(main_frame, style='Dark.TFrame')
+            ip_frame.pack(anchor='w', pady=(2, 4))
+            ttk.Label(ip_frame, text='Local: ', style='Info.TLabel').pack(side=tk.LEFT)
+            ttk.Label(ip_frame, text=f"http://{self.server_info['local_ip']}:8765",
+                      style='InfoHighlight.TLabel').pack(side=tk.LEFT)
+
+        if self.server_info.get('ngrok_url'):
+            ng_frame = ttk.Frame(main_frame, style='Dark.TFrame')
+            ng_frame.pack(anchor='w', pady=(2, 4))
+            ttk.Label(ng_frame, text='Ngrok: ', style='Info.TLabel').pack(side=tk.LEFT)
+            ttk.Label(ng_frame, text=self.server_info['ngrok_url'],
+                      style='InfoHighlight.TLabel').pack(side=tk.LEFT)
+
+        self.root.protocol('WM_DELETE_WINDOW', self._on_close)
+        self.root.mainloop()
+
+    def _on_close(self):
+        """Handle window close — exit the whole app"""
+        self.root.destroy()
+        os._exit(0)
+
+    def _format_value(self, key: str) -> str:
+        v = self.values
+        if key == 'throttle_fwd':  return f"{v['throttle_fwd']:.1f}%"
+        if key == 'throttle_bwd':  return f"{v['throttle_bwd']:.1f}%"
+        if key == 'steering_right': return f"{v['steering_right']:.1f}%"
+        if key == 'steering_left':  return f"{v['steering_left']:.1f}%"
+        if key == 'brake':          return f"{v['brake']:.1f}%"
+        if key == 'lights':         return 'ON' if v['lights'] else 'OFF'
+        if key == 'auto_mode':      return 'ON' if v['auto_mode'] else 'OFF'
+        if key == 'honk':           return 'ON' if v['honk'] else 'OFF'
+        if key == 'gear_1':         return 'ON' if v['gear'] == 1 else 'OFF'
+        if key == 'gear_2':         return 'ON' if v['gear'] == 2 else 'OFF'
+        if key == 'gear_3':         return 'ON' if v['gear'] == 3 else 'OFF'
+        return ''
+
+    def _value_style(self, key: str) -> str:
+        v = self.values
+        if key in ('throttle_fwd', 'throttle_bwd', 'steering_right', 'steering_left', 'brake'):
+            return 'ValueOn.TLabel' if v.get(key, 0) > 0 else 'ValueOff.TLabel'
+        if key == 'lights':    return 'ValueOn.TLabel' if v['lights'] else 'ValueOff.TLabel'
+        if key == 'auto_mode': return 'ValueOn.TLabel' if v['auto_mode'] else 'ValueOff.TLabel'
+        if key == 'honk':      return 'ValueOn.TLabel' if v['honk'] else 'ValueOff.TLabel'
+        if key == 'gear_1':    return 'ValueOn.TLabel' if v['gear'] == 1 else 'ValueOff.TLabel'
+        if key == 'gear_2':    return 'ValueOn.TLabel' if v['gear'] == 2 else 'ValueOff.TLabel'
+        if key == 'gear_3':    return 'ValueOn.TLabel' if v['gear'] == 3 else 'ValueOff.TLabel'
+        return 'ValueOff.TLabel'
+
+    def _format_status(self) -> str:
+        v = self.values
+        cam = 'Active' if v['camera'] else 'Off'
+        return f"Clients: {v['clients']}    Camera: {cam}    Gear: {v['gear']}"
+
+    def _format_server_info(self) -> str:
+        info = self.server_info
+        lines = []
+        lines.append(f"Port: 8765 (HTTP + WebSocket combined)")
+        if info.get('gpio'):
+            lines.append(f"GPIO: Hardware control enabled")
+        else:
+            lines.append(f"GPIO: Simulation mode (no lgpio)")
+        if info.get('camera'):
+            lines.append(f"Camera: libcamera-vid active (640x480 @ 30fps)")
+        else:
+            lines.append(f"Camera: Not available")
+        return '\n'.join(lines)
+
+    def _refresh_gui(self):
+        """Update all labels in the GUI (must be called from GUI thread)"""
+        for key, lbl in self.value_labels.items():
+            lbl.configure(text=self._format_value(key), style=self._value_style(key))
+        if self.status_label:
+            self.status_label.configure(text=self._format_status())
+
     def update(self, key: str, value):
-        """Update a value and redraw the table"""
+        """Update a value and schedule GUI refresh"""
         with self.lock:
             self.values[key] = value
-            if self.initialized:
-                self._draw_full_table()
+            if self.initialized and self.root:
+                try:
+                    self.root.after_idle(self._refresh_gui)
+                except Exception:
+                    pass
 
 status_table = StatusTable()
 
@@ -738,79 +870,21 @@ async def main():
     # Start ngrok tunnel
     ngrok_url = await start_ngrok()
     
-    print("\n" + "=" * 70)
-    print("🚗 RC Car WebSocket Server + Camera Streaming")
-    print("=" * 70)
-    print(f"Local Network IP: {local_ip}")
-    print(f"WebSocket + HTTP Camera Port: 8765 (combined)")
-    print("=" * 70)
-    print("\n📌 GPIO PIN ASSIGNMENTS:")
-    print("=" * 70)
-    print(f"  GPIO {THROTTLE_FORWARD_PIN:2d} - Throttle Forward PWM (0-100%, forward direction)")
-    print(f"  GPIO {THROTTLE_BACKWARD_PIN:2d} - Throttle Backward PWM (0-100%, backward direction)")
-    print(f"  GPIO {STEERING_RIGHT_PIN:2d} - Steering Right PWM (0-100%, right direction)")
-    print(f"  GPIO {STEERING_LEFT_PIN:2d} - Steering Left PWM (0-100%, left direction)")
-    print(f"  GPIO {LIGHTS_PIN:2d} - Lights (Digital on/off)")
-    print(f"  GPIO {AUTO_PIN:2d} - Auto Mode (Digital on/off)")
-    print(f"  GPIO {BRAKE_PIN:2d} - Brake PWM (0-100%)")
-    print(f"  GPIO {HONK_PIN:2d} - Honk (Digital, active when pressed)")
-    print(f"  GPIO {GEAR_1_PIN:2d} - Gear 1 (Digital, active when selected)")
-    print(f"  GPIO {GEAR_2_PIN:2d} - Gear 2 (Digital, active when selected)")
-    print(f"  GPIO {GEAR_3_PIN:2d} - Gear 3 (Digital, active when selected)")
-    print("=" * 70)
-    print("")
-    print("📱 PASTE THIS IN YOUR APP SETTINGS:")
-    print("")
-    print("   LOCAL NETWORK (same WiFi):")
-    print(f"   ┌────────────────────────────────────────┐")
-    print(f"   │  {local_ip:<38}│")
-    print(f"   └────────────────────────────────────────┘")
-    print("")
-    print("   REMOTE ACCESS (ngrok):")
-    if ngrok_url:
-        print("   ✅ ngrok tunnel is ACTIVE!")
-        print("   Paste into app settings:")
-        print("   ┌────────────────────────────────────────┐")
-        print(f"   │  {ngrok_url:<38}│")
-        print("   └────────────────────────────────────────┘")
-        print("")
-        print("   ⚠️  Copy ONLY hostname - no https://, no wss://, no port!")
-        print("   ⚠️  WebSocket connects to /ws endpoint")
-        print("   ✅  Camera ALSO works via ngrok (combined port)")
-    else:
-        print("   ❌ ngrok not started automatically")
-        print("   Manual setup:")
-        print("   1. Open NEW terminal window")
-        print("   2. Run: ngrok http 8765 --host-header=rewrite")
-        print("   3. Look for: Forwarding https://xxxx.ngrok-free.app -> http://localhost:8765")
-        print("   4. Copy ONLY the hostname (e.g., joline-unfauceted-zayne.ngrok-free.app)")
-        print("   5. Paste into app settings")
-        print("")
-        print("   ⚠️  Copy ONLY hostname - no https://, no wss://, no port!")
-    print("")
-    print("📹 CAMERA STREAM:")
-    print("=" * 70)
-    if CAMERA_AVAILABLE and camera_streamer and camera_streamer.camera_process:
-        print(f"   ✅ Camera Active (libcamera-vid)")
-        print(f"   Local: http://{local_ip}:8765/camera")
-        print(f"   View in browser: http://{local_ip}:8765/camera-info")
-        print("   ✅  Camera works on BOTH local network AND ngrok")
-    else:
-        print("   ❌ Camera Not Available")
-        print("   Install: sudo apt install -y libcamera-apps")
-        print("   Stop other apps: pkill libcamera-vid && pkill rpicam-vid")
-        print("   Check detection: libcamera-hello --list-cameras")
-    print("=" * 70)
-    print("")
-    
-    if not GPIO_AVAILABLE:
-        logger.warning("⚠️  Running in SIMULATION MODE (no GPIO)")
-        logger.warning("⚠️  Install lgpio for actual hardware control: pip install lgpio")
-    
-    logging.disable(logging.CRITICAL)
-    
     camera_ok = CAMERA_AVAILABLE and camera_streamer and camera_streamer.camera_process is not None
-    status_table.init_table(camera_ok)
+
+    server_info = {
+        'local_ip': local_ip,
+        'ngrok_url': ngrok_url,
+        'gpio': GPIO_AVAILABLE,
+        'camera': camera_ok,
+    }
+
+    logger.info(f"Server running on http://{local_ip}:8765")
+    if ngrok_url:
+        logger.info(f"ngrok tunnel: {ngrok_url}")
+    logging.disable(logging.CRITICAL)
+
+    status_table.init_table(camera_ok, server_info)
     
     # Keep server running
     try:

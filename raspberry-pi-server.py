@@ -24,9 +24,9 @@ Hardware Setup - GPIO Pin Assignments:
     GPIO 27  - Auto Mode (Digital on/off)
     GPIO 22  - Brake PWM (0-100%)
     GPIO 23  - Honk (Digital, active when pressed)
-    GPIO 24  - Gear 1 (Digital, active when selected)
     GPIO 25  - Gear 2 (Digital, active when selected)
     GPIO 26  - Gear 3 (Digital, active when selected)
+    (Gear 1 is default - no pin needed)
     ========================================
 
 Network Setup (for remote access):
@@ -87,9 +87,9 @@ LIGHTS_PIN = 17             # Digital: Lights on/off
 AUTO_PIN = 27               # Digital: Auto mode on/off
 BRAKE_PIN = 22              # PWM: Brake control (0-100%)
 HONK_PIN = 23               # Digital: Honk (active when pressed)
-GEAR_1_PIN = 24             # Digital: Gear 1 active
 GEAR_2_PIN = 25             # Digital: Gear 2 active
 GEAR_3_PIN = 26             # Digital: Gear 3 active
+# Gear 1 is default (no pin needed)
 # ========================================
 
 # PWM frequency (Hz)
@@ -187,7 +187,7 @@ class StatusTable:
             ('Lights',            f'GPIO {LIGHTS_PIN}',            'Digital', 'lights'),
             ('Auto Mode',         f'GPIO {AUTO_PIN}',              'Digital', 'auto_mode'),
             ('Honk',              f'GPIO {HONK_PIN}',              'Digital', 'honk'),
-            ('Gear 1',            f'GPIO {GEAR_1_PIN}',            'Digital', 'gear_1'),
+            ('Gear 1 (default)',  'No pin',                        'Default', 'gear_1'),
             ('Gear 2',            f'GPIO {GEAR_2_PIN}',            'Digital', 'gear_2'),
             ('Gear 3',            f'GPIO {GEAR_3_PIN}',            'Digital', 'gear_3'),
         ]
@@ -452,34 +452,18 @@ class RCCarController:
             lgpio.gpio_claim_output(self.gpio_chip, AUTO_PIN)
             lgpio.gpio_claim_output(self.gpio_chip, BRAKE_PIN)
             lgpio.gpio_claim_output(self.gpio_chip, HONK_PIN)
-            lgpio.gpio_claim_output(self.gpio_chip, GEAR_1_PIN)
             lgpio.gpio_claim_output(self.gpio_chip, GEAR_2_PIN)
             lgpio.gpio_claim_output(self.gpio_chip, GEAR_3_PIN)
             
-            # Setup PWM for throttle speed (50Hz frequency)
+            # ALL pins LOW on startup
             lgpio.tx_pwm(self.gpio_chip, THROTTLE_PWM_PIN, PWM_FREQUENCY, 0)
-            
-            # Direction pin LOW (forward) initially
             lgpio.gpio_write(self.gpio_chip, DIRECTION_PIN, 0)
-            
-            # Setup PWM for steering right/left (50Hz frequency)
             lgpio.tx_pwm(self.gpio_chip, STEERING_RIGHT_PIN, PWM_FREQUENCY, 0)
             lgpio.tx_pwm(self.gpio_chip, STEERING_LEFT_PIN, PWM_FREQUENCY, 0)
-            
-            # Setup PWM for brake (50Hz frequency)
             lgpio.tx_pwm(self.gpio_chip, BRAKE_PIN, PWM_FREQUENCY, 0)
-            
-            # Lights off initially
             lgpio.gpio_write(self.gpio_chip, LIGHTS_PIN, 0)
-            
-            # Auto mode off initially
             lgpio.gpio_write(self.gpio_chip, AUTO_PIN, 0)
-            
-            # Honk off initially
             lgpio.gpio_write(self.gpio_chip, HONK_PIN, 0)
-            
-            # Gear 1 on by default
-            lgpio.gpio_write(self.gpio_chip, GEAR_1_PIN, 1)
             lgpio.gpio_write(self.gpio_chip, GEAR_2_PIN, 0)
             lgpio.gpio_write(self.gpio_chip, GEAR_3_PIN, 0)
             
@@ -543,7 +527,6 @@ class RCCarController:
             self.current_gear = gear
             status_table.update('gear', gear)
             if GPIO_AVAILABLE and self.gpio_chip is not None:
-                lgpio.gpio_write(self.gpio_chip, GEAR_1_PIN, 1 if gear == 1 else 0)
                 lgpio.gpio_write(self.gpio_chip, GEAR_2_PIN, 1 if gear == 2 else 0)
                 lgpio.gpio_write(self.gpio_chip, GEAR_3_PIN, 1 if gear == 3 else 0)
     
@@ -572,20 +555,46 @@ class RCCarController:
         if GPIO_AVAILABLE and self.gpio_chip is not None:
             lgpio.gpio_write(self.gpio_chip, HONK_PIN, 1 if active else 0)
     
-    def cleanup(self):
-        """Cleanup GPIO resources"""
+    def set_all_low(self):
+        """Set ALL pins to LOW (safe state)"""
+        self.throttle_duty = 0
+        self.direction_active = False
+        self.steering_right_duty = 0
+        self.steering_left_duty = 0
+        self.brake_duty = 0
+        self.lights_on = False
+        self.auto_mode = False
+        self.honk_active = False
+        self.current_gear = 1
+        
+        status_table.update('throttle_pwm', 0)
+        status_table.update('direction', False)
+        status_table.update('steering_right', 0)
+        status_table.update('steering_left', 0)
+        status_table.update('brake', 0)
+        status_table.update('lights', False)
+        status_table.update('auto_mode', False)
+        status_table.update('honk', False)
+        status_table.update('gear', 1)
+        
         if GPIO_AVAILABLE and self.gpio_chip is not None:
-            # Stop PWM signals
             lgpio.tx_pwm(self.gpio_chip, THROTTLE_PWM_PIN, PWM_FREQUENCY, 0)
             lgpio.gpio_write(self.gpio_chip, DIRECTION_PIN, 0)
             lgpio.tx_pwm(self.gpio_chip, STEERING_RIGHT_PIN, PWM_FREQUENCY, 0)
             lgpio.tx_pwm(self.gpio_chip, STEERING_LEFT_PIN, PWM_FREQUENCY, 0)
             lgpio.tx_pwm(self.gpio_chip, BRAKE_PIN, PWM_FREQUENCY, 0)
-            
-            # Turn off digital outputs
+            lgpio.gpio_write(self.gpio_chip, LIGHTS_PIN, 0)
+            lgpio.gpio_write(self.gpio_chip, AUTO_PIN, 0)
             lgpio.gpio_write(self.gpio_chip, HONK_PIN, 0)
+            lgpio.gpio_write(self.gpio_chip, GEAR_2_PIN, 0)
+            lgpio.gpio_write(self.gpio_chip, GEAR_3_PIN, 0)
+            logger.info("All pins set to LOW")
+    
+    def cleanup(self):
+        """Cleanup GPIO resources"""
+        if GPIO_AVAILABLE and self.gpio_chip is not None:
+            self.set_all_low()
             
-            # Free GPIO pins
             lgpio.gpio_free(self.gpio_chip, THROTTLE_PWM_PIN)
             lgpio.gpio_free(self.gpio_chip, DIRECTION_PIN)
             lgpio.gpio_free(self.gpio_chip, STEERING_RIGHT_PIN)
@@ -594,11 +603,9 @@ class RCCarController:
             lgpio.gpio_free(self.gpio_chip, AUTO_PIN)
             lgpio.gpio_free(self.gpio_chip, BRAKE_PIN)
             lgpio.gpio_free(self.gpio_chip, HONK_PIN)
-            lgpio.gpio_free(self.gpio_chip, GEAR_1_PIN)
             lgpio.gpio_free(self.gpio_chip, GEAR_2_PIN)
             lgpio.gpio_free(self.gpio_chip, GEAR_3_PIN)
             
-            # Close GPIO chip
             lgpio.gpiochip_close(self.gpio_chip)
             logger.info("GPIO cleanup completed")
 
@@ -662,12 +669,7 @@ async def websocket_handler(request):
     finally:
         connected_clients.discard(ws)
         status_table.update('clients', len(connected_clients))
-        rc_car.set_throttle_forward(0)
-        rc_car.set_throttle_backward(0)
-        rc_car.set_steering_right(0)
-        rc_car.set_steering_left(0)
-        rc_car.set_brake(0)
-        rc_car.set_honk(False)
+        rc_car.set_all_low()
     
     return ws
 

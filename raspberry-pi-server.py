@@ -472,10 +472,27 @@ class RCCarController:
             logger.error(f"Failed to initialize GPIO: {e}")
             self.gpio_chip = None
     
+    def _update_auto_brake(self, throttle_percentage: float):
+        """Auto brake: ON when throttle is 0%, OFF when throttle > 0%"""
+        if throttle_percentage == 0 and self.brake_duty == 0:
+            self.brake_duty = 100
+            status_table.update('brake', 100)
+            if GPIO_AVAILABLE and self.gpio_chip is not None:
+                lgpio.tx_pwm(self.gpio_chip, BRAKE_PIN, PWM_FREQUENCY, 100)
+                logger.info("Auto Brake -> ON (throttle is 0%)")
+        elif throttle_percentage > 0 and self.brake_duty > 0:
+            self.brake_duty = 0
+            status_table.update('brake', 0)
+            if GPIO_AVAILABLE and self.gpio_chip is not None:
+                lgpio.tx_pwm(self.gpio_chip, BRAKE_PIN, PWM_FREQUENCY, 0)
+                logger.info("Auto Brake -> OFF (throttle active)")
+
     def set_throttle_forward(self, percentage: float):
-        duty_cycle = percentage * (self.current_gear / 3)
+        duty_cycle = percentage
         self.throttle_duty = duty_cycle
         status_table.update('throttle_pwm', duty_cycle)
+        
+        self._update_auto_brake(percentage)
         
         if percentage > 0 and self.direction_active:
             self.direction_active = False
@@ -488,9 +505,11 @@ class RCCarController:
             lgpio.tx_pwm(self.gpio_chip, THROTTLE_PWM_PIN, PWM_FREQUENCY, duty_cycle)
     
     def set_throttle_backward(self, percentage: float):
-        duty_cycle = percentage * (self.current_gear / 3)
+        duty_cycle = percentage
         self.throttle_duty = duty_cycle
         status_table.update('throttle_pwm', duty_cycle)
+        
+        self._update_auto_brake(percentage)
         
         if percentage > 0 and not self.direction_active:
             self.direction_active = True

@@ -488,18 +488,24 @@ class RCCarController:
         if GPIO_AVAILABLE and self.gpio_chip is not None:
             duty_cycle = percentage * (self.current_gear / 3)
             self.throttle_duty = duty_cycle
-            self.direction_backward = False
-            lgpio.gpio_write(self.gpio_chip, DIRECTION_PIN, 0)
+            if self.direction_backward:
+                self.direction_backward = False
+                lgpio.gpio_write(self.gpio_chip, DIRECTION_PIN, 0)
             lgpio.tx_pwm(self.gpio_chip, THROTTLE_PWM_PIN, PWM_FREQUENCY, duty_cycle)
     
     def set_throttle_backward(self, percentage: float):
         status_table.update('throttle_pwm', percentage)
-        status_table.update('direction', percentage > 0)
+        want_backward = percentage > 0
+        status_table.update('direction', want_backward)
         if GPIO_AVAILABLE and self.gpio_chip is not None:
             duty_cycle = percentage * (self.current_gear / 3)
             self.throttle_duty = duty_cycle
-            self.direction_backward = percentage > 0
-            lgpio.gpio_write(self.gpio_chip, DIRECTION_PIN, 1 if percentage > 0 else 0)
+            if want_backward and not self.direction_backward:
+                self.direction_backward = True
+                lgpio.gpio_write(self.gpio_chip, DIRECTION_PIN, 1)
+            elif not want_backward and self.direction_backward:
+                self.direction_backward = False
+                lgpio.gpio_write(self.gpio_chip, DIRECTION_PIN, 0)
             lgpio.tx_pwm(self.gpio_chip, THROTTLE_PWM_PIN, PWM_FREQUENCY, duty_cycle)
     
     def set_steering_right(self, percentage: float):

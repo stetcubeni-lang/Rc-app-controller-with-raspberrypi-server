@@ -321,12 +321,12 @@ export default function RCCarController() {
 
   const handleThrottleChange = (value: number) => {
     setThrottle(value);
-    if (value > 0) {
+    if (value >= 0) {
       sendCommand("throttle_forward", value);
-    } else if (value < 0) {
-      sendCommand("throttle_backward", Math.abs(value));
+      sendCommand("throttle_backward", 0);
     } else {
       sendCommand("throttle_forward", 0);
+      sendCommand("throttle_backward", Math.abs(value));
     }
   };
 

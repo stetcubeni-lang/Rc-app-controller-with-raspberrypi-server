@@ -48,6 +48,7 @@ export default function RCCarController() {
   
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastThrottleDirection = useRef<'forward' | 'backward' | 'stopped'>('stopped');
 
   useEffect(() => {
     loadSavedIP();
@@ -321,12 +322,25 @@ export default function RCCarController() {
 
   const handleThrottleChange = (value: number) => {
     setThrottle(value);
-    if (value >= 0) {
+    if (value > 0) {
+      if (lastThrottleDirection.current === 'backward') {
+        sendCommand("throttle_backward", 0);
+      }
+      lastThrottleDirection.current = 'forward';
       sendCommand("throttle_forward", value);
-      sendCommand("throttle_backward", 0);
-    } else {
-      sendCommand("throttle_forward", 0);
+    } else if (value < 0) {
+      if (lastThrottleDirection.current === 'forward') {
+        sendCommand("throttle_forward", 0);
+      }
+      lastThrottleDirection.current = 'backward';
       sendCommand("throttle_backward", Math.abs(value));
+    } else {
+      if (lastThrottleDirection.current === 'forward') {
+        sendCommand("throttle_forward", 0);
+      } else if (lastThrottleDirection.current === 'backward') {
+        sendCommand("throttle_backward", 0);
+      }
+      lastThrottleDirection.current = 'stopped';
     }
   };
 

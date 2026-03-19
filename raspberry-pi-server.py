@@ -500,7 +500,7 @@ class RCCarController:
                 lgpio.gpio_write(self.gpio_chip, DIRECTION_PIN, 0)
                 logger.info("Direction PIN -> LOW (forward)")
         
-        if GPIO_AVAILABLE and self.gpio_chip is not None:
+        if not self.direction_active and GPIO_AVAILABLE and self.gpio_chip is not None:
             lgpio.tx_pwm(self.gpio_chip, THROTTLE_PWM_PIN, PWM_FREQUENCY, duty_cycle)
     
     def set_throttle_backward(self, percentage: float):

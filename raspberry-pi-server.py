@@ -491,22 +491,30 @@ class RCCarController:
             if self.direction_backward:
                 self.direction_backward = False
                 lgpio.gpio_write(self.gpio_chip, DIRECTION_PIN, 0)
+                logger.info("Direction pin OFF (forward)")
             lgpio.tx_pwm(self.gpio_chip, THROTTLE_PWM_PIN, PWM_FREQUENCY, duty_cycle)
     
     def set_throttle_backward(self, percentage: float):
         status_table.update('throttle_pwm', percentage)
-        want_backward = percentage > 0
-        status_table.update('direction', want_backward)
         if GPIO_AVAILABLE and self.gpio_chip is not None:
             duty_cycle = percentage * (self.current_gear / 3)
             self.throttle_duty = duty_cycle
-            if want_backward and not self.direction_backward:
+            if percentage > 0 and not self.direction_backward:
                 self.direction_backward = True
                 lgpio.gpio_write(self.gpio_chip, DIRECTION_PIN, 1)
-            elif not want_backward and self.direction_backward:
+                logger.info("Direction pin ON (backward) - activated once")
+                status_table.update('direction', True)
+            elif percentage <= 0 and self.direction_backward:
                 self.direction_backward = False
                 lgpio.gpio_write(self.gpio_chip, DIRECTION_PIN, 0)
+                logger.info("Direction pin OFF (back to 0) - deactivated")
+                status_table.update('direction', False)
             lgpio.tx_pwm(self.gpio_chip, THROTTLE_PWM_PIN, PWM_FREQUENCY, duty_cycle)
+        else:
+            if percentage > 0:
+                status_table.update('direction', True)
+            elif percentage <= 0:
+                status_table.update('direction', False)
     
     def set_steering_right(self, percentage: float):
         status_table.update('steering_right', percentage)
@@ -556,6 +564,41 @@ class RCCarController:
         if GPIO_AVAILABLE and self.gpio_chip is not None:
             lgpio.gpio_write(self.gpio_chip, HONK_PIN, 1 if active else 0)
     
+    def all_pins_low(self):
+        """Set ALL outputs to LOW/0 - used on client disconnect"""
+        self.throttle_duty = 0
+        self.direction_backward = False
+        self.steering_right_duty = 0
+        self.steering_left_duty = 0
+        self.brake_duty = 0
+        self.honk_active = False
+        self.lights_on = False
+        self.auto_mode = False
+        self.current_gear = 1
+
+        status_table.update('throttle_pwm', 0.0)
+        status_table.update('direction', False)
+        status_table.update('steering_right', 0.0)
+        status_table.update('steering_left', 0.0)
+        status_table.update('brake', 0.0)
+        status_table.update('honk', False)
+        status_table.update('lights', False)
+        status_table.update('auto_mode', False)
+        status_table.update('gear', 1)
+
+        if GPIO_AVAILABLE and self.gpio_chip is not None:
+            lgpio.tx_pwm(self.gpio_chip, THROTTLE_PWM_PIN, PWM_FREQUENCY, 0)
+            lgpio.gpio_write(self.gpio_chip, DIRECTION_PIN, 0)
+            lgpio.tx_pwm(self.gpio_chip, STEERING_RIGHT_PIN, PWM_FREQUENCY, 0)
+            lgpio.tx_pwm(self.gpio_chip, STEERING_LEFT_PIN, PWM_FREQUENCY, 0)
+            lgpio.tx_pwm(self.gpio_chip, BRAKE_PIN, PWM_FREQUENCY, 0)
+            lgpio.gpio_write(self.gpio_chip, HONK_PIN, 0)
+            lgpio.gpio_write(self.gpio_chip, LIGHTS_PIN, 0)
+            lgpio.gpio_write(self.gpio_chip, AUTO_PIN, 0)
+            lgpio.gpio_write(self.gpio_chip, GEAR_2_PIN, 0)
+            lgpio.gpio_write(self.gpio_chip, GEAR_3_PIN, 0)
+            logger.info("All pins set to LOW")
+
     def cleanup(self):
         """Cleanup GPIO resources"""
         if GPIO_AVAILABLE and self.gpio_chip is not None:
@@ -647,11 +690,8 @@ async def websocket_handler(request):
     finally:
         connected_clients.discard(ws)
         status_table.update('clients', len(connected_clients))
-        rc_car.set_throttle_forward(0)
-        rc_car.set_steering_right(0)
-        rc_car.set_steering_left(0)
-        rc_car.set_brake(0)
-        rc_car.set_honk(False)
+        logger.info(f"Client {client_address} disconnected — setting ALL pins LOW")
+        rc_car.all_pins_low()
     
     return ws
 

@@ -16,8 +16,8 @@ Hardware Setup - GPIO Pin Assignments:
     ========================================
     PIN ASSIGNMENT LIST:
     ========================================
-    GPIO 18  - Throttle Forward PWM (0-100%, forward direction)
-    GPIO 19  - Throttle Backward PWM (0-100%, backward direction)
+    GPIO 18  - Throttle PWM (0-100%, speed for both directions)
+    GPIO 19  - Direction Digital (HIGH = backward, LOW = forward, toggles once)
     GPIO 20  - Steering Right PWM (0-100%, right direction)
     GPIO 21  - Steering Left PWM (0-100%, left direction)
     GPIO 17  - Lights (Digital on/off)
@@ -79,8 +79,8 @@ else:
 # ========================================
 # GPIO PIN ASSIGNMENT LIST
 # ========================================
-THROTTLE_FORWARD_PIN = 18   # PWM: Throttle forward (0-100%)
-THROTTLE_BACKWARD_PIN = 19  # PWM: Throttle backward (0-100%)
+THROTTLE_PWM_PIN = 18       # PWM: Throttle speed (0-100%, both directions)
+DIRECTION_PIN = 19          # Digital: Direction (HIGH = backward, LOW = forward)
 STEERING_RIGHT_PIN = 20     # PWM: Steering right (0-100%)
 STEERING_LEFT_PIN = 21      # PWM: Steering left (0-100%)
 LIGHTS_PIN = 17             # Digital: Lights on/off
@@ -109,8 +109,8 @@ class StatusTable:
         self.value_labels = {}
         self.info_label = None
         self.values = {
-            'throttle_fwd': 0.0,
-            'throttle_bwd': 0.0,
+            'throttle_pwm': 0.0,
+            'direction': False,
             'steering_right': 0.0,
             'steering_left': 0.0,
             'brake': 0.0,
@@ -179,8 +179,8 @@ class StatusTable:
             lbl.grid(row=0, column=col, sticky='nsew', padx=1, pady=1)
 
         rows = [
-            ('Throttle Forward',  f'GPIO {THROTTLE_FORWARD_PIN}',  'PWM',     'throttle_fwd'),
-            ('Throttle Backward', f'GPIO {THROTTLE_BACKWARD_PIN}', 'PWM',     'throttle_bwd'),
+            ('Throttle Speed',    f'GPIO {THROTTLE_PWM_PIN}',      'PWM',     'throttle_pwm'),
+            ('Direction (BWD)',   f'GPIO {DIRECTION_PIN}',         'Digital', 'direction'),
             ('Steering Right',    f'GPIO {STEERING_RIGHT_PIN}',    'PWM',     'steering_right'),
             ('Steering Left',     f'GPIO {STEERING_LEFT_PIN}',     'PWM',     'steering_left'),
             ('Brake',             f'GPIO {BRAKE_PIN}',             'PWM',     'brake'),
@@ -238,8 +238,8 @@ class StatusTable:
 
     def _format_value(self, key: str) -> str:
         v = self.values
-        if key == 'throttle_fwd':  return f"{v['throttle_fwd']:.1f}%"
-        if key == 'throttle_bwd':  return f"{v['throttle_bwd']:.1f}%"
+        if key == 'throttle_pwm': return f"{v['throttle_pwm']:.1f}%"
+        if key == 'direction':    return 'BWD' if v['direction'] else 'FWD'
         if key == 'steering_right': return f"{v['steering_right']:.1f}%"
         if key == 'steering_left':  return f"{v['steering_left']:.1f}%"
         if key == 'brake':          return f"{v['brake']:.1f}%"
@@ -253,8 +253,9 @@ class StatusTable:
 
     def _value_style(self, key: str) -> str:
         v = self.values
-        if key in ('throttle_fwd', 'throttle_bwd', 'steering_right', 'steering_left', 'brake'):
+        if key in ('throttle_pwm', 'steering_right', 'steering_left', 'brake'):
             return 'ValueOn.TLabel' if v.get(key, 0) > 0 else 'ValueOff.TLabel'
+        if key == 'direction':  return 'ValueOn.TLabel' if v['direction'] else 'ValueOff.TLabel'
         if key == 'lights':    return 'ValueOn.TLabel' if v['lights'] else 'ValueOff.TLabel'
         if key == 'auto_mode': return 'ValueOn.TLabel' if v['auto_mode'] else 'ValueOff.TLabel'
         if key == 'honk':      return 'ValueOn.TLabel' if v['honk'] else 'ValueOff.TLabel'
@@ -427,8 +428,8 @@ class RCCarController:
         self.lights_on = False
         self.auto_mode = False
         self.honk_active = False
-        self.throttle_forward_duty = 0
-        self.throttle_backward_duty = 0
+        self.throttle_duty = 0
+        self.direction_active = False
         self.steering_right_duty = 0
         self.steering_left_duty = 0
         self.brake_duty = 0
@@ -443,8 +444,8 @@ class RCCarController:
             self.gpio_chip = lgpio.gpiochip_open(4)
             
             # Claim GPIO pins for output
-            lgpio.gpio_claim_output(self.gpio_chip, THROTTLE_FORWARD_PIN)
-            lgpio.gpio_claim_output(self.gpio_chip, THROTTLE_BACKWARD_PIN)
+            lgpio.gpio_claim_output(self.gpio_chip, THROTTLE_PWM_PIN)
+            lgpio.gpio_claim_output(self.gpio_chip, DIRECTION_PIN)
             lgpio.gpio_claim_output(self.gpio_chip, STEERING_RIGHT_PIN)
             lgpio.gpio_claim_output(self.gpio_chip, STEERING_LEFT_PIN)
             lgpio.gpio_claim_output(self.gpio_chip, LIGHTS_PIN)
@@ -455,9 +456,11 @@ class RCCarController:
             lgpio.gpio_claim_output(self.gpio_chip, GEAR_2_PIN)
             lgpio.gpio_claim_output(self.gpio_chip, GEAR_3_PIN)
             
-            # Setup PWM for throttle forward/backward (50Hz frequency)
-            lgpio.tx_pwm(self.gpio_chip, THROTTLE_FORWARD_PIN, PWM_FREQUENCY, 0)
-            lgpio.tx_pwm(self.gpio_chip, THROTTLE_BACKWARD_PIN, PWM_FREQUENCY, 0)
+            # Setup PWM for throttle speed (50Hz frequency)
+            lgpio.tx_pwm(self.gpio_chip, THROTTLE_PWM_PIN, PWM_FREQUENCY, 0)
+            
+            # Direction pin LOW (forward) initially
+            lgpio.gpio_write(self.gpio_chip, DIRECTION_PIN, 0)
             
             # Setup PWM for steering right/left (50Hz frequency)
             lgpio.tx_pwm(self.gpio_chip, STEERING_RIGHT_PIN, PWM_FREQUENCY, 0)
@@ -486,18 +489,40 @@ class RCCarController:
             self.gpio_chip = None
     
     def set_throttle_forward(self, percentage: float):
-        status_table.update('throttle_fwd', percentage)
+        duty_cycle = percentage * (self.current_gear / 3)
+        self.throttle_duty = duty_cycle
+        status_table.update('throttle_pwm', duty_cycle)
+        
+        if percentage > 0 and self.direction_active:
+            self.direction_active = False
+            status_table.update('direction', False)
+            if GPIO_AVAILABLE and self.gpio_chip is not None:
+                lgpio.gpio_write(self.gpio_chip, DIRECTION_PIN, 0)
+                logger.info("Direction PIN -> LOW (forward)")
+        
         if GPIO_AVAILABLE and self.gpio_chip is not None:
-            duty_cycle = percentage * (self.current_gear / 3)
-            self.throttle_forward_duty = duty_cycle
-            lgpio.tx_pwm(self.gpio_chip, THROTTLE_FORWARD_PIN, PWM_FREQUENCY, duty_cycle)
+            lgpio.tx_pwm(self.gpio_chip, THROTTLE_PWM_PIN, PWM_FREQUENCY, duty_cycle)
     
     def set_throttle_backward(self, percentage: float):
-        status_table.update('throttle_bwd', percentage)
+        duty_cycle = percentage * (self.current_gear / 3)
+        self.throttle_duty = duty_cycle
+        status_table.update('throttle_pwm', duty_cycle)
+        
+        if percentage > 0 and not self.direction_active:
+            self.direction_active = True
+            status_table.update('direction', True)
+            if GPIO_AVAILABLE and self.gpio_chip is not None:
+                lgpio.gpio_write(self.gpio_chip, DIRECTION_PIN, 1)
+                logger.info("Direction PIN -> HIGH (backward) [activated once]")
+        elif percentage == 0 and self.direction_active:
+            self.direction_active = False
+            status_table.update('direction', False)
+            if GPIO_AVAILABLE and self.gpio_chip is not None:
+                lgpio.gpio_write(self.gpio_chip, DIRECTION_PIN, 0)
+                logger.info("Direction PIN -> LOW (stopped) [deactivated once]")
+        
         if GPIO_AVAILABLE and self.gpio_chip is not None:
-            duty_cycle = percentage * (self.current_gear / 3)
-            self.throttle_backward_duty = duty_cycle
-            lgpio.tx_pwm(self.gpio_chip, THROTTLE_BACKWARD_PIN, PWM_FREQUENCY, duty_cycle)
+            lgpio.tx_pwm(self.gpio_chip, THROTTLE_PWM_PIN, PWM_FREQUENCY, duty_cycle)
     
     def set_steering_right(self, percentage: float):
         status_table.update('steering_right', percentage)
@@ -551,8 +576,8 @@ class RCCarController:
         """Cleanup GPIO resources"""
         if GPIO_AVAILABLE and self.gpio_chip is not None:
             # Stop PWM signals
-            lgpio.tx_pwm(self.gpio_chip, THROTTLE_FORWARD_PIN, PWM_FREQUENCY, 0)
-            lgpio.tx_pwm(self.gpio_chip, THROTTLE_BACKWARD_PIN, PWM_FREQUENCY, 0)
+            lgpio.tx_pwm(self.gpio_chip, THROTTLE_PWM_PIN, PWM_FREQUENCY, 0)
+            lgpio.gpio_write(self.gpio_chip, DIRECTION_PIN, 0)
             lgpio.tx_pwm(self.gpio_chip, STEERING_RIGHT_PIN, PWM_FREQUENCY, 0)
             lgpio.tx_pwm(self.gpio_chip, STEERING_LEFT_PIN, PWM_FREQUENCY, 0)
             lgpio.tx_pwm(self.gpio_chip, BRAKE_PIN, PWM_FREQUENCY, 0)
@@ -561,8 +586,8 @@ class RCCarController:
             lgpio.gpio_write(self.gpio_chip, HONK_PIN, 0)
             
             # Free GPIO pins
-            lgpio.gpio_free(self.gpio_chip, THROTTLE_FORWARD_PIN)
-            lgpio.gpio_free(self.gpio_chip, THROTTLE_BACKWARD_PIN)
+            lgpio.gpio_free(self.gpio_chip, THROTTLE_PWM_PIN)
+            lgpio.gpio_free(self.gpio_chip, DIRECTION_PIN)
             lgpio.gpio_free(self.gpio_chip, STEERING_RIGHT_PIN)
             lgpio.gpio_free(self.gpio_chip, STEERING_LEFT_PIN)
             lgpio.gpio_free(self.gpio_chip, LIGHTS_PIN)

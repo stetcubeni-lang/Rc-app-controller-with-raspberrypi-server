@@ -15,7 +15,7 @@ import {
 import { WebView } from 'react-native-webview';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import { LinearGradient } from "expo-linear-gradient";
-import { Zap, Video, Settings as SettingsIcon, Maximize2 } from "lucide-react-native";
+import { Zap, Video, Settings as SettingsIcon, Maximize2, RotateCcw } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -67,17 +67,6 @@ export default function RCCarController() {
   const lastThrottleDirection = useRef<'forward' | 'backward' | 'stopped'>('stopped');
   const lastServerSyncRef = useRef<number>(0);
 
-  useEffect(() => {
-    void loadSavedIP();
-    void loadCameraSettings();
-  }, []);
-
-  useEffect(() => {
-    if (!piIP) {
-      setShowSettings(true);
-    }
-  }, [piIP]);
-
   const loadSavedIP = async () => {
     try {
       const savedIP = await AsyncStorage.getItem('raspberry_pi_ip');
@@ -100,34 +89,48 @@ export default function RCCarController() {
     }
   };
 
-  const loadCameraSettings = async () => {
+  const loadCameraSettings = useCallback(async () => {
     try {
       const savedPosition = await AsyncStorage.getItem('camera_position');
       const savedSize = await AsyncStorage.getItem('camera_size');
       
-      if (savedPosition) {
-        const pos = JSON.parse(savedPosition);
-        setCameraPosition(pos);
-        console.log('Loaded camera position:', pos);
-      }
-      
-      if (savedSize) {
-        const size = JSON.parse(savedSize);
-        setCameraSize(size);
-        console.log('Loaded camera size:', size);
-      }
+      const parsedPosition = savedPosition
+        ? JSON.parse(savedPosition) as { x: number; y: number }
+        : { x: 20, y: 120 };
+      const parsedSize = savedSize
+        ? JSON.parse(savedSize) as { width: number; height: number }
+        : { width: width * 0.75, height: width * 0.75 * (9 / 16) };
+
+      const clampedLayout = clampCameraLayout(parsedPosition, parsedSize);
+      setCameraPosition(clampedLayout.position);
+      setCameraSize(clampedLayout.size);
+
+      console.log('Loaded camera position:', clampedLayout.position);
+      console.log('Loaded camera size:', clampedLayout.size);
       
       setHasLoadedCameraSettings(true);
     } catch (error) {
       console.error('Failed to load camera settings:', error);
       setHasLoadedCameraSettings(true);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    void loadSavedIP();
+    void loadCameraSettings();
+  }, [loadCameraSettings]);
+
+  useEffect(() => {
+    if (!piIP) {
+      setShowSettings(true);
+    }
+  }, [piIP]);
 
   const saveCameraPosition = async (pos: { x: number; y: number }) => {
     try {
-      await AsyncStorage.setItem('camera_position', JSON.stringify(pos));
-      console.log('Saved camera position:', pos);
+      const clampedLayout = clampCameraLayout(pos, cameraSize);
+      await AsyncStorage.setItem('camera_position', JSON.stringify(clampedLayout.position));
+      console.log('Saved camera position:', clampedLayout.position);
     } catch (error) {
       console.error('Failed to save camera position:', error);
     }
@@ -135,8 +138,9 @@ export default function RCCarController() {
 
   const saveCameraSize = async (size: { width: number; height: number }) => {
     try {
-      await AsyncStorage.setItem('camera_size', JSON.stringify(size));
-      console.log('Saved camera size:', size);
+      const clampedLayout = clampCameraLayout(cameraPosition, size);
+      await AsyncStorage.setItem('camera_size', JSON.stringify(clampedLayout.size));
+      console.log('Saved camera size:', clampedLayout.size);
     } catch (error) {
       console.error('Failed to save camera size:', error);
     }
@@ -722,6 +726,25 @@ function getVerticalPercentage(locationY: number, sliderHeight: number) {
   return Math.max(-100, Math.min(100, ((sliderHeight / 2 - locationY) / (sliderHeight / 2)) * 100));
 }
 
+function clampCameraLayout(
+  position: { x: number; y: number },
+  size: { width: number; height: number }
+) {
+  const nextWidth = Math.max(150, Math.min(width - 40, size.width));
+  const nextHeight = Math.max(100, Math.min(height - 100, size.height));
+
+  return {
+    size: {
+      width: nextWidth,
+      height: nextHeight,
+    },
+    position: {
+      x: Math.max(0, Math.min(width - nextWidth, position.x)),
+      y: Math.max(0, Math.min(height - nextHeight, position.y)),
+    },
+  };
+}
+
 function ThrottleSlider({ value, onChange }: SliderProps) {
   const sliderHeight = height * 0.45;
 
@@ -981,6 +1004,41 @@ function DraggableResizableCamera({
     onCameraError(false);
   }, [cameraKey, onCameraError]);
 
+  useEffect(() => {
+    const clampedLayout = clampCameraLayout(position, localSize);
+
+    if (
+      clampedLayout.position.x !== position.x ||
+      clampedLayout.position.y !== position.y
+    ) {
+      console.log('📹 Restoring camera window into visible area:', clampedLayout.position);
+      onPositionChange(clampedLayout.position);
+    }
+
+    if (
+      clampedLayout.size.width !== localSize.width ||
+      clampedLayout.size.height !== localSize.height
+    ) {
+      console.log('📹 Restoring camera size:', clampedLayout.size);
+      setLocalSize(clampedLayout.size);
+      onSizeChange(clampedLayout.size);
+    }
+
+    pan.setValue(clampedLayout.position);
+  }, [localSize, onPositionChange, onSizeChange, pan, position]);
+
+  const resetCameraWindow = useCallback(() => {
+    const defaultSize = { width: width * 0.75, height: width * 0.75 * (9 / 16) };
+    const defaultPosition = { x: 20, y: 120 };
+    const clampedLayout = clampCameraLayout(defaultPosition, defaultSize);
+
+    console.log('📹 Resetting camera window:', clampedLayout);
+    setLocalSize(clampedLayout.size);
+    onSizeChange(clampedLayout.size);
+    onPositionChange(clampedLayout.position);
+    pan.setValue(clampedLayout.position);
+  }, [onPositionChange, onSizeChange, pan]);
+
   const dragPanResponder = PanResponder.create({
     onStartShouldSetPanResponder: () => !isResizing,
     onStartShouldSetPanResponderCapture: () => !isResizing,
@@ -1000,10 +1058,12 @@ function DraggableResizableCamera({
     ),
     onPanResponderRelease: (_, gesture) => {
       pan.flattenOffset();
-      const newX = Math.max(0, Math.min(width - localSize.width, position.x + gesture.dx));
-      const newY = Math.max(0, Math.min(height - localSize.height, position.y + gesture.dy));
-      onPositionChange({ x: newX, y: newY });
-      pan.setValue({ x: newX, y: newY });
+      const clampedLayout = clampCameraLayout(
+        { x: position.x + gesture.dx, y: position.y + gesture.dy },
+        localSize
+      );
+      onPositionChange(clampedLayout.position);
+      pan.setValue(clampedLayout.position);
     },
   });
 
@@ -1030,12 +1090,20 @@ function DraggableResizableCamera({
       setLocalSize({ width: newWidth, height: newHeight });
     },
     onPanResponderRelease: (_, gesture) => {
-      const finalWidth = Math.max(150, Math.min(width - 40, initialSize.current.width + gesture.dx));
-      const finalHeight = Math.max(100, Math.min(height - 100, initialSize.current.height + gesture.dy));
-      const finalSize = { width: finalWidth, height: finalHeight };
-      console.log('📏 Resize ended', finalSize);
-      setLocalSize(finalSize);
-      onSizeChange(finalSize);
+      const clampedLayout = clampCameraLayout(position, {
+        width: initialSize.current.width + gesture.dx,
+        height: initialSize.current.height + gesture.dy,
+      });
+      console.log('📏 Resize ended', clampedLayout.size);
+      setLocalSize(clampedLayout.size);
+      onSizeChange(clampedLayout.size);
+      if (
+        clampedLayout.position.x !== position.x ||
+        clampedLayout.position.y !== position.y
+      ) {
+        onPositionChange(clampedLayout.position);
+        pan.setValue(clampedLayout.position);
+      }
       setIsResizing(false);
     },
   });
@@ -1122,12 +1190,22 @@ function DraggableResizableCamera({
         <View style={styles.cameraHeader}>
           <View style={styles.cameraHeaderLeft} {...dragPanResponder.panHandlers}>
             <Video size={18} color="#f59e0b" />
+            <Text style={styles.cameraLabel}>CAMERA</Text>
           </View>
           <View style={styles.cameraHeaderRight}>
+            <Pressable
+              onPress={resetCameraWindow}
+              style={styles.resetCameraButton}
+              hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
+              testID="reset-camera-window"
+            >
+              <RotateCcw size={16} color="#1a1410" />
+            </Pressable>
             <Pressable 
               onPress={handleFullscreen} 
               style={styles.fullscreenButton}
               hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
+              testID="toggle-camera-fullscreen"
             >
               <Maximize2 size={18} color="#1a1410" />
             </Pressable>
@@ -1563,6 +1641,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700" as const,
     letterSpacing: 1.5,
+  },
+  resetCameraButton: {
+    padding: 8,
+    backgroundColor: "rgba(245, 158, 11, 0.9)",
+    borderRadius: 6,
   },
   fullscreenButton: {
     padding: 8,

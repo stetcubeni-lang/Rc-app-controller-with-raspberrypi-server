@@ -10,6 +10,7 @@ import {
   Platform,
   Animated,
   PanResponder,
+  GestureResponderEvent,
 } from "react-native";
 import { WebView } from 'react-native-webview';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
@@ -21,6 +22,21 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const { width, height } = Dimensions.get("window");
 
 type Gear = 1 | 2 | 3;
+
+interface ServerStateMessage {
+  type?: string;
+  throttle_pwm?: number;
+  direction?: boolean;
+  steering_right?: number;
+  steering_left?: number;
+  brake?: number;
+  lights?: boolean;
+  auto_mode?: boolean;
+  honk?: boolean;
+  gear?: number;
+  clients?: number;
+  camera?: boolean;
+}
 
 const DEFAULT_IP = "";
 
@@ -49,10 +65,11 @@ export default function RCCarController() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastThrottleDirection = useRef<'forward' | 'backward' | 'stopped'>('stopped');
+  const lastServerSyncRef = useRef<number>(0);
 
   useEffect(() => {
-    loadSavedIP();
-    loadCameraSettings();
+    void loadSavedIP();
+    void loadCameraSettings();
   }, []);
 
   useEffect(() => {
@@ -182,8 +199,39 @@ export default function RCCarController() {
       ws.onmessage = (event) => {
         try {
           if (typeof event.data === 'string' && event.data.trim().startsWith('{')) {
-            const data = JSON.parse(event.data);
+            const data = JSON.parse(event.data) as ServerStateMessage;
             console.log('Received from server:', data);
+
+            if (data.type === 'state') {
+              lastServerSyncRef.current = Date.now();
+              const throttleValue = typeof data.throttle_pwm === 'number'
+                ? (data.direction ? -data.throttle_pwm : data.throttle_pwm)
+                : 0;
+              const steeringRightValue = data.steering_right ?? 0;
+              const steeringLeftValue = data.steering_left ?? 0;
+              const steeringValue = steeringRightValue > 0
+                ? steeringRightValue
+                : steeringLeftValue > 0
+                  ? -steeringLeftValue
+                  : 0;
+
+              setThrottle(throttleValue);
+              setBrake(data.brake ?? 0);
+              setSteering(steeringValue);
+              setLightsOn(data.lights ?? false);
+              setAutoMode(data.auto_mode ?? false);
+              setHonkPressed(data.honk ?? false);
+
+              if (data.gear === 1 || data.gear === 2 || data.gear === 3) {
+                setGear(data.gear);
+              }
+
+              lastThrottleDirection.current = throttleValue > 0
+                ? 'forward'
+                : throttleValue < 0
+                  ? 'backward'
+                  : 'stopped';
+            }
           } else {
             console.log('Received non-JSON message:', event.data);
           }
@@ -303,7 +351,7 @@ export default function RCCarController() {
     
     disconnectFromServer();
     setPiIP(trimmedIP);
-    saveIP(trimmedIP);
+    void saveIP(trimmedIP);
     setShowSettings(false);
     setConnectionAttempts(0);
     
@@ -629,12 +677,12 @@ export default function RCCarController() {
               position={cameraPosition}
               onPositionChange={(pos) => {
                 setCameraPosition(pos);
-                saveCameraPosition(pos);
+                void saveCameraPosition(pos);
               }}
               size={cameraSize}
               onSizeChange={(size) => {
                 setCameraSize(size);
-                saveCameraSize(size);
+                void saveCameraSize(size);
               }}
               cameraError={cameraError}
               onCameraError={setCameraError}
@@ -662,71 +710,79 @@ interface SliderProps {
   onChange: (value: number) => void;
 }
 
+function getHorizontalPercentage(locationX: number, sliderWidth: number) {
+  return Math.max(0, Math.min(100, (locationX / sliderWidth) * 100));
+}
+
+function getSteeringPercentage(locationX: number, sliderWidth: number) {
+  return Math.max(-100, Math.min(100, ((locationX - sliderWidth / 2) / (sliderWidth / 2)) * 100));
+}
+
+function getVerticalPercentage(locationY: number, sliderHeight: number) {
+  return Math.max(-100, Math.min(100, ((sliderHeight / 2 - locationY) / (sliderHeight / 2)) * 100));
+}
+
 function ThrottleSlider({ value, onChange }: SliderProps) {
   const sliderHeight = height * 0.45;
-  const sliderRef = useRef<View>(null);
-  const sliderBounds = useRef({ x: 0, y: 0, width: 60, height: sliderHeight });
-  const startY = useRef(0);
+
+  const handleRelease = useCallback(() => {
+    console.log('[Throttle] Released -> reset to 0');
+    onChange(0);
+  }, [onChange]);
+
+  const handleTap = useCallback((event: GestureResponderEvent) => {
+    const percentage = getVerticalPercentage(event.nativeEvent.locationY, sliderHeight);
+    console.log('[Throttle] Press detected:', percentage);
+    onChange(percentage);
+  }, [onChange, sliderHeight]);
 
   const panGesture = Gesture.Pan()
     .runOnJS(true)
     .onBegin((event) => {
-      startY.current = event.y;
-      const y = event.y;
-      const percentage = Math.max(
-        -100,
-        Math.min(100, ((sliderHeight / 2 - y) / (sliderHeight / 2)) * 100)
-      );
+      const percentage = getVerticalPercentage(event.y, sliderHeight);
       onChange(percentage);
-      console.log(`[Throttle] Gesture started`);
+      console.log('[Throttle] Gesture started');
     })
     .onUpdate((event) => {
-      const y = event.y;
-      const percentage = Math.max(
-        -100,
-        Math.min(100, ((sliderHeight / 2 - y) / (sliderHeight / 2)) * 100)
-      );
+      const percentage = getVerticalPercentage(event.y, sliderHeight);
       onChange(percentage);
     })
     .onEnd(() => {
-      console.log(`[Throttle] Gesture ended`);
+      console.log('[Throttle] Gesture ended');
       onChange(0);
     })
     .onFinalize(() => {
-      onChange(0);
+      handleRelease();
     });
 
   return (
     <View style={styles.throttleContainer}>
       <Text style={styles.sliderLabel}>THROTTLE</Text>
       <GestureDetector gesture={panGesture}>
-        <View
-          ref={sliderRef}
+        <Pressable
+          testID="throttle-slider"
           style={[styles.verticalSlider, { height: sliderHeight }]}
-          onLayout={(event) => {
-            sliderRef.current?.measureInWindow((pageX, pageY) => {
-              sliderBounds.current = { x: pageX, y: pageY, width: 60, height: sliderHeight };
-              console.log(`[Throttle] Layout bounds:`, sliderBounds.current);
-            });
-          }}
+          onPressIn={handleTap}
+          onPressOut={handleRelease}
+          onTouchCancel={handleRelease}
         >
-        <View style={styles.sliderCenter} />
-        <View
-          pointerEvents="none"
-          style={[
-            styles.sliderThumb,
-            {
-              top:
-                sliderHeight / 2 - (value / 100) * (sliderHeight / 2) - 20,
-            },
-          ]}
-        >
-          <LinearGradient
-            colors={value > 0 ? ["#f59e0b", "#d97706"] : ["#ef4444", "#dc2626"]}
-            style={styles.thumbGradient}
-          />
-        </View>
-        </View>
+          <View style={styles.sliderCenter} />
+          <View
+            pointerEvents="none"
+            style={[
+              styles.sliderThumb,
+              {
+                top:
+                  sliderHeight / 2 - (value / 100) * (sliderHeight / 2) - 20,
+              },
+            ]}
+          >
+            <LinearGradient
+              colors={value > 0 ? ["#f59e0b", "#d97706"] : ["#ef4444", "#dc2626"]}
+              style={styles.thumbGradient}
+            />
+          </View>
+        </Pressable>
       </GestureDetector>
       <View style={styles.sliderLabels}>
         <Text style={styles.sliderLabelText}>FWD</Text>
@@ -738,65 +794,63 @@ function ThrottleSlider({ value, onChange }: SliderProps) {
 
 function BrakeSlider({ value, onChange }: SliderProps) {
   const sliderWidth = width * 0.45;
-  const sliderRef = useRef<View>(null);
-  const sliderBounds = useRef({ x: 0, y: 0, width: sliderWidth, height: 60 });
+
+  const handleRelease = useCallback(() => {
+    console.log('[Brake] Released -> reset to 0');
+    onChange(0);
+  }, [onChange]);
+
+  const handleTap = useCallback((event: GestureResponderEvent) => {
+    const percentage = getHorizontalPercentage(event.nativeEvent.locationX, sliderWidth);
+    console.log('[Brake] Press detected:', percentage);
+    onChange(percentage);
+  }, [onChange, sliderWidth]);
 
   const panGesture = Gesture.Pan()
     .runOnJS(true)
     .onBegin((event) => {
-      const x = event.x;
-      const percentage = Math.max(
-        0,
-        Math.min(100, (x / sliderWidth) * 100)
-      );
+      const percentage = getHorizontalPercentage(event.x, sliderWidth);
       onChange(percentage);
-      console.log(`[Brake] Gesture started`);
+      console.log('[Brake] Gesture started');
     })
     .onUpdate((event) => {
-      const x = event.x;
-      const percentage = Math.max(
-        0,
-        Math.min(100, (x / sliderWidth) * 100)
-      );
+      const percentage = getHorizontalPercentage(event.x, sliderWidth);
       onChange(percentage);
     })
     .onEnd(() => {
-      console.log(`[Brake] Gesture ended`);
+      console.log('[Brake] Gesture ended');
       onChange(0);
     })
     .onFinalize(() => {
-      onChange(0);
+      handleRelease();
     });
 
   return (
     <View style={styles.brakeContainer}>
       <Text style={styles.sliderLabel}>BRAKE</Text>
       <GestureDetector gesture={panGesture}>
-        <View
-          ref={sliderRef}
+        <Pressable
+          testID="brake-slider"
           style={[styles.horizontalSlider, { width: sliderWidth }]}
-          onLayout={(event) => {
-            sliderRef.current?.measureInWindow((pageX, pageY) => {
-              sliderBounds.current = { x: pageX, y: pageY, width: sliderWidth, height: 60 };
-              console.log(`[Brake] Layout bounds:`, sliderBounds.current);
-            });
-          }}
+          onPressIn={handleTap}
+          onPressOut={handleRelease}
+          onTouchCancel={handleRelease}
         >
-        <View
-          pointerEvents="none"
-          style={[
-            styles.sliderThumb,
-            {
-              left: (value / 100) * sliderWidth - 20,
-            },
-          ]}
-        >
-          <LinearGradient
-            colors={["#ef4444", "#dc2626"]}
-            style={styles.thumbGradient}
-          />
-        </View>
-        </View>
+          <View
+            pointerEvents="none"
+            style={[
+              styles.sliderThumb,
+              {
+                left: (value / 100) * sliderWidth - 20,
+              },
+            ]}
+          >
+            <LinearGradient
+              colors={["#ef4444", "#dc2626"]}
+              style={styles.thumbGradient}
+            />
+          </View>
+        </Pressable>
       </GestureDetector>
       <View style={styles.sliderLabelsHorizontal}>
         <Text style={styles.sliderLabelText}>0%</Text>
@@ -808,66 +862,64 @@ function BrakeSlider({ value, onChange }: SliderProps) {
 
 function SteeringSlider({ value, onChange }: SliderProps) {
   const sliderWidth = width * 0.45;
-  const sliderRef = useRef<View>(null);
-  const sliderBounds = useRef({ x: 0, y: 0, width: sliderWidth, height: 60 });
+
+  const handleRelease = useCallback(() => {
+    console.log('[Steering] Released -> reset to 0');
+    onChange(0);
+  }, [onChange]);
+
+  const handleTap = useCallback((event: GestureResponderEvent) => {
+    const percentage = getSteeringPercentage(event.nativeEvent.locationX, sliderWidth);
+    console.log('[Steering] Press detected:', percentage);
+    onChange(percentage);
+  }, [onChange, sliderWidth]);
 
   const panGesture = Gesture.Pan()
     .runOnJS(true)
     .onBegin((event) => {
-      const x = event.x;
-      const percentage = Math.max(
-        -100,
-        Math.min(100, ((x - sliderWidth / 2) / (sliderWidth / 2)) * 100)
-      );
+      const percentage = getSteeringPercentage(event.x, sliderWidth);
       onChange(percentage);
-      console.log(`[Steering] Gesture started`);
+      console.log('[Steering] Gesture started');
     })
     .onUpdate((event) => {
-      const x = event.x;
-      const percentage = Math.max(
-        -100,
-        Math.min(100, ((x - sliderWidth / 2) / (sliderWidth / 2)) * 100)
-      );
+      const percentage = getSteeringPercentage(event.x, sliderWidth);
       onChange(percentage);
     })
     .onEnd(() => {
-      console.log(`[Steering] Gesture ended`);
+      console.log('[Steering] Gesture ended');
       onChange(0);
     })
     .onFinalize(() => {
-      onChange(0);
+      handleRelease();
     });
 
   return (
     <View style={styles.steeringContainer}>
       <Text style={styles.sliderLabel}>STEERING</Text>
       <GestureDetector gesture={panGesture}>
-        <View
-          ref={sliderRef}
+        <Pressable
+          testID="steering-slider"
           style={[styles.horizontalSlider, { width: sliderWidth }]}
-          onLayout={(event) => {
-            sliderRef.current?.measureInWindow((pageX, pageY) => {
-              sliderBounds.current = { x: pageX, y: pageY, width: sliderWidth, height: 60 };
-              console.log(`[Steering] Layout bounds:`, sliderBounds.current);
-            });
-          }}
+          onPressIn={handleTap}
+          onPressOut={handleRelease}
+          onTouchCancel={handleRelease}
         >
-        <View style={styles.sliderCenter} />
-        <View
-          pointerEvents="none"
-          style={[
-            styles.sliderThumb,
-            {
-              left: sliderWidth / 2 + (value / 100) * (sliderWidth / 2) - 20,
-            },
-          ]}
-        >
-          <LinearGradient
-            colors={["#f59e0b", "#d97706"]}
-            style={styles.thumbGradient}
-          />
-        </View>
-        </View>
+          <View style={styles.sliderCenter} />
+          <View
+            pointerEvents="none"
+            style={[
+              styles.sliderThumb,
+              {
+                left: sliderWidth / 2 + (value / 100) * (sliderWidth / 2) - 20,
+              },
+            ]}
+          >
+            <LinearGradient
+              colors={["#f59e0b", "#d97706"]}
+              style={styles.thumbGradient}
+            />
+          </View>
+        </Pressable>
       </GestureDetector>
       <View style={styles.sliderLabelsHorizontal}>
         <Text style={styles.sliderLabelText}>LEFT</Text>
@@ -897,10 +949,10 @@ function DraggableResizableCamera({
   onPositionChange, 
   size, 
   onSizeChange,
-  cameraError,
+  cameraError: _cameraError,
   onCameraError,
   cameraKey,
-  onRefresh,
+  onRefresh: _onRefresh,
   isFullscreen,
   onFullscreenChange
 }: DraggableResizableCameraProps) {

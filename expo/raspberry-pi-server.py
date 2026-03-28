@@ -18,8 +18,8 @@ Hardware Setup - GPIO Pin Assignments:
     ========================================
     GPIO 18  - Throttle PWM (0-100%, speed for both directions)
     GPIO 19  - Direction Digital (HIGH = backward, LOW = forward, toggles once)
-    GPIO 20  - Steering Right PWM (0-100%, right direction)
-    GPIO 21  - Steering Left PWM (0-100%, left direction)
+    GPIO 20  - Steering Direction Digital (HIGH = right, LOW = left/center)
+    GPIO 21  - Steering PWM (0-100% for left/right strength)
     GPIO 17  - Lights (Digital on/off)
     GPIO 27  - Auto Mode (Digital on/off)
     GPIO 22  - Brake PWM (0-100%)
@@ -81,8 +81,8 @@ else:
 # ========================================
 THROTTLE_PWM_PIN = 18       # PWM: Throttle speed (0-100%, both directions)
 DIRECTION_PIN = 19          # Digital: Direction (HIGH = backward, LOW = forward)
-STEERING_RIGHT_PIN = 20     # PWM: Steering right (0-100%)
-STEERING_LEFT_PIN = 21      # PWM: Steering left (0-100%)
+STEERING_DIRECTION_PIN = 20 # Digital: Steering direction (HIGH = right, LOW = left/center)
+STEERING_PWM_PIN = 21       # PWM: Steering strength (0-100%)
 LIGHTS_PIN = 17             # Digital: Lights on/off
 AUTO_PIN = 27               # Digital: Auto mode on/off
 BRAKE_PIN = 22              # PWM: Brake control (0-100%)
@@ -111,8 +111,8 @@ class StatusTable:
         self.values = {
             'throttle_pwm': 0.0,
             'direction': False,
-            'steering_right': 0.0,
-            'steering_left': 0.0,
+            'steering_pwm': 0.0,
+            'steering_direction_right': False,
             'brake': 0.0,
             'lights': False,
             'auto_mode': False,
@@ -180,10 +180,10 @@ class StatusTable:
 
         rows = [
             ('Throttle Speed',    f'GPIO {THROTTLE_PWM_PIN}',      'PWM',     'throttle_pwm'),
-            ('Direction (BWD)',   f'GPIO {DIRECTION_PIN}',         'Digital', 'direction'),
-            ('Steering Right',    f'GPIO {STEERING_RIGHT_PIN}',    'PWM',     'steering_right'),
-            ('Steering Left',     f'GPIO {STEERING_LEFT_PIN}',     'PWM',     'steering_left'),
-            ('Brake',             f'GPIO {BRAKE_PIN}',             'PWM',     'brake'),
+            ('Direction (BWD)',    f'GPIO {DIRECTION_PIN}',           'Digital', 'direction'),
+            ('Steering Direction', f'GPIO {STEERING_DIRECTION_PIN}',   'Digital', 'steering_direction_right'),
+            ('Steering PWM',       f'GPIO {STEERING_PWM_PIN}',         'PWM',     'steering_pwm'),
+            ('Brake',              f'GPIO {BRAKE_PIN}',               'PWM',     'brake'),
             ('Lights',            f'GPIO {LIGHTS_PIN}',            'Digital', 'lights'),
             ('Auto Mode',         f'GPIO {AUTO_PIN}',              'Digital', 'auto_mode'),
             ('Honk',              f'GPIO {HONK_PIN}',              'Digital', 'honk'),
@@ -240,8 +240,8 @@ class StatusTable:
         v = self.values
         if key == 'throttle_pwm': return f"{v['throttle_pwm']:.1f}%"
         if key == 'direction':    return 'BWD' if v['direction'] else 'FWD'
-        if key == 'steering_right': return f"{v['steering_right']:.1f}%"
-        if key == 'steering_left':  return f"{v['steering_left']:.1f}%"
+        if key == 'steering_direction_right': return 'RIGHT' if v['steering_direction_right'] else 'LEFT/CENTER'
+        if key == 'steering_pwm': return f"{v['steering_pwm']:.1f}%"
         if key == 'brake':          return f"{v['brake']:.1f}%"
         if key == 'lights':         return 'ON' if v['lights'] else 'OFF'
         if key == 'auto_mode':      return 'ON' if v['auto_mode'] else 'OFF'
@@ -253,9 +253,10 @@ class StatusTable:
 
     def _value_style(self, key: str) -> str:
         v = self.values
-        if key in ('throttle_pwm', 'steering_right', 'steering_left', 'brake'):
+        if key in ('throttle_pwm', 'steering_pwm', 'brake'):
             return 'ValueOn.TLabel' if v.get(key, 0) > 0 else 'ValueOff.TLabel'
-        if key == 'direction':  return 'ValueOn.TLabel' if v['direction'] else 'ValueOff.TLabel'
+        if key in ('direction', 'steering_direction_right'):
+            return 'ValueOn.TLabel' if v[key] else 'ValueOff.TLabel'
         if key == 'lights':    return 'ValueOn.TLabel' if v['lights'] else 'ValueOff.TLabel'
         if key == 'auto_mode': return 'ValueOn.TLabel' if v['auto_mode'] else 'ValueOff.TLabel'
         if key == 'honk':      return 'ValueOn.TLabel' if v['honk'] else 'ValueOff.TLabel'
@@ -430,8 +431,8 @@ class RCCarController:
         self.honk_active = False
         self.throttle_duty = 0
         self.direction_active = False
-        self.steering_right_duty = 0
-        self.steering_left_duty = 0
+        self.steering_duty = 0
+        self.steering_direction_right = False
         self.brake_duty = 0
         
         if GPIO_AVAILABLE:
@@ -446,8 +447,8 @@ class RCCarController:
             # Claim GPIO pins for output
             lgpio.gpio_claim_output(self.gpio_chip, THROTTLE_PWM_PIN)
             lgpio.gpio_claim_output(self.gpio_chip, DIRECTION_PIN)
-            lgpio.gpio_claim_output(self.gpio_chip, STEERING_RIGHT_PIN)
-            lgpio.gpio_claim_output(self.gpio_chip, STEERING_LEFT_PIN)
+            lgpio.gpio_claim_output(self.gpio_chip, STEERING_DIRECTION_PIN)
+            lgpio.gpio_claim_output(self.gpio_chip, STEERING_PWM_PIN)
             lgpio.gpio_claim_output(self.gpio_chip, LIGHTS_PIN)
             lgpio.gpio_claim_output(self.gpio_chip, AUTO_PIN)
             lgpio.gpio_claim_output(self.gpio_chip, BRAKE_PIN)
@@ -458,8 +459,8 @@ class RCCarController:
             # ALL pins LOW on startup
             lgpio.tx_pwm(self.gpio_chip, THROTTLE_PWM_PIN, PWM_FREQUENCY, 0)
             lgpio.gpio_write(self.gpio_chip, DIRECTION_PIN, 0)
-            lgpio.tx_pwm(self.gpio_chip, STEERING_RIGHT_PIN, PWM_FREQUENCY, 0)
-            lgpio.tx_pwm(self.gpio_chip, STEERING_LEFT_PIN, PWM_FREQUENCY, 0)
+            lgpio.gpio_write(self.gpio_chip, STEERING_DIRECTION_PIN, 0)
+            lgpio.tx_pwm(self.gpio_chip, STEERING_PWM_PIN, PWM_FREQUENCY, 0)
             lgpio.tx_pwm(self.gpio_chip, BRAKE_PIN, PWM_FREQUENCY, 0)
             lgpio.gpio_write(self.gpio_chip, LIGHTS_PIN, 0)
             lgpio.gpio_write(self.gpio_chip, AUTO_PIN, 0)
@@ -528,18 +529,24 @@ class RCCarController:
             lgpio.tx_pwm(self.gpio_chip, THROTTLE_PWM_PIN, PWM_FREQUENCY, duty_cycle)
     
     def set_steering_right(self, percentage: float):
-        status_table.update('steering_right', percentage)
+        duty_cycle = percentage
+        self.steering_duty = duty_cycle
+        self.steering_direction_right = percentage > 0
+        status_table.update('steering_pwm', duty_cycle)
+        status_table.update('steering_direction_right', percentage > 0)
         if GPIO_AVAILABLE and self.gpio_chip is not None:
-            duty_cycle = percentage
-            self.steering_right_duty = duty_cycle
-            lgpio.tx_pwm(self.gpio_chip, STEERING_RIGHT_PIN, PWM_FREQUENCY, duty_cycle)
+            lgpio.gpio_write(self.gpio_chip, STEERING_DIRECTION_PIN, 1 if percentage > 0 else 0)
+            lgpio.tx_pwm(self.gpio_chip, STEERING_PWM_PIN, PWM_FREQUENCY, duty_cycle)
     
     def set_steering_left(self, percentage: float):
-        status_table.update('steering_left', percentage)
+        duty_cycle = percentage
+        self.steering_duty = duty_cycle
+        self.steering_direction_right = False
+        status_table.update('steering_pwm', duty_cycle)
+        status_table.update('steering_direction_right', False)
         if GPIO_AVAILABLE and self.gpio_chip is not None:
-            duty_cycle = percentage
-            self.steering_left_duty = duty_cycle
-            lgpio.tx_pwm(self.gpio_chip, STEERING_LEFT_PIN, PWM_FREQUENCY, duty_cycle)
+            lgpio.gpio_write(self.gpio_chip, STEERING_DIRECTION_PIN, 0)
+            lgpio.tx_pwm(self.gpio_chip, STEERING_PWM_PIN, PWM_FREQUENCY, duty_cycle)
     
     def set_gear(self, gear: int):
         if 1 <= gear <= 3:
@@ -578,8 +585,8 @@ class RCCarController:
         """Set ALL pins to LOW (safe state)"""
         self.throttle_duty = 0
         self.direction_active = False
-        self.steering_right_duty = 0
-        self.steering_left_duty = 0
+        self.steering_duty = 0
+        self.steering_direction_right = False
         self.brake_duty = 0
         self.lights_on = False
         self.auto_mode = False
@@ -588,8 +595,8 @@ class RCCarController:
         
         status_table.update('throttle_pwm', 0)
         status_table.update('direction', False)
-        status_table.update('steering_right', 0)
-        status_table.update('steering_left', 0)
+        status_table.update('steering_pwm', 0)
+        status_table.update('steering_direction_right', False)
         status_table.update('brake', 0)
         status_table.update('lights', False)
         status_table.update('auto_mode', False)
@@ -599,8 +606,8 @@ class RCCarController:
         if GPIO_AVAILABLE and self.gpio_chip is not None:
             lgpio.tx_pwm(self.gpio_chip, THROTTLE_PWM_PIN, PWM_FREQUENCY, 0)
             lgpio.gpio_write(self.gpio_chip, DIRECTION_PIN, 0)
-            lgpio.tx_pwm(self.gpio_chip, STEERING_RIGHT_PIN, PWM_FREQUENCY, 0)
-            lgpio.tx_pwm(self.gpio_chip, STEERING_LEFT_PIN, PWM_FREQUENCY, 0)
+            lgpio.gpio_write(self.gpio_chip, STEERING_DIRECTION_PIN, 0)
+            lgpio.tx_pwm(self.gpio_chip, STEERING_PWM_PIN, PWM_FREQUENCY, 0)
             lgpio.tx_pwm(self.gpio_chip, BRAKE_PIN, PWM_FREQUENCY, 0)
             lgpio.gpio_write(self.gpio_chip, LIGHTS_PIN, 0)
             lgpio.gpio_write(self.gpio_chip, AUTO_PIN, 0)
@@ -616,8 +623,8 @@ class RCCarController:
             
             lgpio.gpio_free(self.gpio_chip, THROTTLE_PWM_PIN)
             lgpio.gpio_free(self.gpio_chip, DIRECTION_PIN)
-            lgpio.gpio_free(self.gpio_chip, STEERING_RIGHT_PIN)
-            lgpio.gpio_free(self.gpio_chip, STEERING_LEFT_PIN)
+            lgpio.gpio_free(self.gpio_chip, STEERING_DIRECTION_PIN)
+            lgpio.gpio_free(self.gpio_chip, STEERING_PWM_PIN)
             lgpio.gpio_free(self.gpio_chip, LIGHTS_PIN)
             lgpio.gpio_free(self.gpio_chip, AUTO_PIN)
             lgpio.gpio_free(self.gpio_chip, BRAKE_PIN)

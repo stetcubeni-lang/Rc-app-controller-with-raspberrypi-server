@@ -98,48 +98,6 @@ PWM_FREQUENCY = 50
 # Connected clients
 connected_clients: Set[web.WebSocketResponse] = set()
 
-async def broadcast_state():
-    """Broadcast current controller state to all connected clients"""
-    if not connected_clients:
-        return
-
-    payload = json.dumps({
-        'type': 'state',
-        'throttle_pwm': rc_car.throttle_duty,
-        'direction': rc_car.direction_active,
-        'steering_right': rc_car.steering_right_duty,
-        'steering_left': rc_car.steering_left_duty,
-        'brake': rc_car.brake_duty,
-        'lights': rc_car.lights_on,
-        'auto_mode': rc_car.auto_mode,
-        'honk': rc_car.honk_active,
-        'gear': rc_car.current_gear,
-        'clients': len(connected_clients),
-        'camera': CAMERA_AVAILABLE and camera_streamer is not None and camera_streamer.camera_process is not None,
-    })
-
-    stale_clients = []
-    for client in connected_clients:
-        if client.closed:
-            stale_clients.append(client)
-            continue
-        try:
-            await client.send_str(payload)
-        except Exception as e:
-            logger.warning(f"State broadcast failed: {e}")
-            stale_clients.append(client)
-
-    for client in stale_clients:
-        connected_clients.discard(client)
-
-    status_table.update('clients', len(connected_clients))
-
-async def state_broadcast_loop():
-    """Continuously push state to connected clients for UI sync"""
-    while True:
-        await broadcast_state()
-        await asyncio.sleep(0.1)
-
 # Live status table with Tkinter GUI
 class StatusTable:
     """Displays a Tkinter window with a live-updating status table"""
@@ -681,7 +639,6 @@ async def websocket_handler(request):
     client_address = request.remote
     connected_clients.add(ws)
     status_table.update('clients', len(connected_clients))
-    await broadcast_state()
     
     try:
         async for msg in ws:
@@ -693,32 +650,26 @@ async def websocket_handler(request):
                     if command_type == 'throttle_forward':
                         value = data.get('value', 0)
                         rc_car.set_throttle_forward(value)
-                        await broadcast_state()
                     
                     elif command_type == 'throttle_backward':
                         value = data.get('value', 0)
                         rc_car.set_throttle_backward(value)
-                        await broadcast_state()
                     
                     elif command_type == 'steering_right':
                         value = data.get('value', 0)
                         rc_car.set_steering_right(value)
-                        await broadcast_state()
                     
                     elif command_type == 'steering_left':
                         value = data.get('value', 0)
                         rc_car.set_steering_left(value)
-                        await broadcast_state()
                     
                     elif command_type == 'brake':
                         value = data.get('value', 0)
                         rc_car.set_brake(value)
-                        await broadcast_state()
                     
                     elif command_type == 'honk':
                         value = data.get('value', False)
                         rc_car.set_honk(value)
-                        await broadcast_state()
                     
                     elif command_type == 'settings':
                         gear = data.get('gear', 1)
@@ -727,7 +678,6 @@ async def websocket_handler(request):
                         rc_car.set_gear(gear)
                         rc_car.set_lights(lights)
                         rc_car.set_auto_mode(auto)
-                        await broadcast_state()
                     
                 except json.JSONDecodeError:
                     logger.error(f"Invalid JSON received: {msg.data}")
@@ -739,7 +689,6 @@ async def websocket_handler(request):
         connected_clients.discard(ws)
         status_table.update('clients', len(connected_clients))
         rc_car.set_all_low()
-        await broadcast_state()
     
     return ws
 
@@ -982,13 +931,11 @@ async def main():
     logging.disable(logging.CRITICAL)
 
     status_table.init_table(camera_ok, server_info)
-    broadcast_task = asyncio.create_task(state_broadcast_loop())
     
     # Keep server running
     try:
         await asyncio.Future()
     finally:
-        broadcast_task.cancel()
         await runner.cleanup()
 
 if __name__ == "__main__":

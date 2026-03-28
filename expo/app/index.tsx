@@ -10,33 +10,17 @@ import {
   Platform,
   Animated,
   PanResponder,
-  GestureResponderEvent,
 } from "react-native";
 import { WebView } from 'react-native-webview';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import { LinearGradient } from "expo-linear-gradient";
-import { Zap, Video, Settings as SettingsIcon, Maximize2, RotateCcw } from "lucide-react-native";
+import { Zap, Video, Settings as SettingsIcon, Maximize2 } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width, height } = Dimensions.get("window");
 
 type Gear = 1 | 2 | 3;
-
-interface ServerStateMessage {
-  type?: string;
-  throttle_pwm?: number;
-  direction?: boolean;
-  steering_right?: number;
-  steering_left?: number;
-  brake?: number;
-  lights?: boolean;
-  auto_mode?: boolean;
-  honk?: boolean;
-  gear?: number;
-  clients?: number;
-  camera?: boolean;
-}
 
 const DEFAULT_IP = "";
 
@@ -65,7 +49,17 @@ export default function RCCarController() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastThrottleDirection = useRef<'forward' | 'backward' | 'stopped'>('stopped');
-  const lastServerSyncRef = useRef<number>(0);
+
+  useEffect(() => {
+    loadSavedIP();
+    loadCameraSettings();
+  }, []);
+
+  useEffect(() => {
+    if (!piIP) {
+      setShowSettings(true);
+    }
+  }, [piIP]);
 
   const loadSavedIP = async () => {
     try {
@@ -89,48 +83,34 @@ export default function RCCarController() {
     }
   };
 
-  const loadCameraSettings = useCallback(async () => {
+  const loadCameraSettings = async () => {
     try {
       const savedPosition = await AsyncStorage.getItem('camera_position');
       const savedSize = await AsyncStorage.getItem('camera_size');
       
-      const parsedPosition = savedPosition
-        ? JSON.parse(savedPosition) as { x: number; y: number }
-        : { x: 20, y: 120 };
-      const parsedSize = savedSize
-        ? JSON.parse(savedSize) as { width: number; height: number }
-        : { width: width * 0.75, height: width * 0.75 * (9 / 16) };
-
-      const clampedLayout = clampCameraLayout(parsedPosition, parsedSize);
-      setCameraPosition(clampedLayout.position);
-      setCameraSize(clampedLayout.size);
-
-      console.log('Loaded camera position:', clampedLayout.position);
-      console.log('Loaded camera size:', clampedLayout.size);
+      if (savedPosition) {
+        const pos = JSON.parse(savedPosition);
+        setCameraPosition(pos);
+        console.log('Loaded camera position:', pos);
+      }
+      
+      if (savedSize) {
+        const size = JSON.parse(savedSize);
+        setCameraSize(size);
+        console.log('Loaded camera size:', size);
+      }
       
       setHasLoadedCameraSettings(true);
     } catch (error) {
       console.error('Failed to load camera settings:', error);
       setHasLoadedCameraSettings(true);
     }
-  }, []);
-
-  useEffect(() => {
-    void loadSavedIP();
-    void loadCameraSettings();
-  }, [loadCameraSettings]);
-
-  useEffect(() => {
-    if (!piIP) {
-      setShowSettings(true);
-    }
-  }, [piIP]);
+  };
 
   const saveCameraPosition = async (pos: { x: number; y: number }) => {
     try {
-      const clampedLayout = clampCameraLayout(pos, cameraSize);
-      await AsyncStorage.setItem('camera_position', JSON.stringify(clampedLayout.position));
-      console.log('Saved camera position:', clampedLayout.position);
+      await AsyncStorage.setItem('camera_position', JSON.stringify(pos));
+      console.log('Saved camera position:', pos);
     } catch (error) {
       console.error('Failed to save camera position:', error);
     }
@@ -138,9 +118,8 @@ export default function RCCarController() {
 
   const saveCameraSize = async (size: { width: number; height: number }) => {
     try {
-      const clampedLayout = clampCameraLayout(cameraPosition, size);
-      await AsyncStorage.setItem('camera_size', JSON.stringify(clampedLayout.size));
-      console.log('Saved camera size:', clampedLayout.size);
+      await AsyncStorage.setItem('camera_size', JSON.stringify(size));
+      console.log('Saved camera size:', size);
     } catch (error) {
       console.error('Failed to save camera size:', error);
     }
@@ -203,39 +182,8 @@ export default function RCCarController() {
       ws.onmessage = (event) => {
         try {
           if (typeof event.data === 'string' && event.data.trim().startsWith('{')) {
-            const data = JSON.parse(event.data) as ServerStateMessage;
+            const data = JSON.parse(event.data);
             console.log('Received from server:', data);
-
-            if (data.type === 'state') {
-              lastServerSyncRef.current = Date.now();
-              const throttleValue = typeof data.throttle_pwm === 'number'
-                ? (data.direction ? -data.throttle_pwm : data.throttle_pwm)
-                : 0;
-              const steeringRightValue = data.steering_right ?? 0;
-              const steeringLeftValue = data.steering_left ?? 0;
-              const steeringValue = steeringRightValue > 0
-                ? steeringRightValue
-                : steeringLeftValue > 0
-                  ? -steeringLeftValue
-                  : 0;
-
-              setThrottle(throttleValue);
-              setBrake(data.brake ?? 0);
-              setSteering(steeringValue);
-              setLightsOn(data.lights ?? false);
-              setAutoMode(data.auto_mode ?? false);
-              setHonkPressed(data.honk ?? false);
-
-              if (data.gear === 1 || data.gear === 2 || data.gear === 3) {
-                setGear(data.gear);
-              }
-
-              lastThrottleDirection.current = throttleValue > 0
-                ? 'forward'
-                : throttleValue < 0
-                  ? 'backward'
-                  : 'stopped';
-            }
           } else {
             console.log('Received non-JSON message:', event.data);
           }
@@ -355,7 +303,7 @@ export default function RCCarController() {
     
     disconnectFromServer();
     setPiIP(trimmedIP);
-    void saveIP(trimmedIP);
+    saveIP(trimmedIP);
     setShowSettings(false);
     setConnectionAttempts(0);
     
@@ -681,12 +629,12 @@ export default function RCCarController() {
               position={cameraPosition}
               onPositionChange={(pos) => {
                 setCameraPosition(pos);
-                void saveCameraPosition(pos);
+                saveCameraPosition(pos);
               }}
               size={cameraSize}
               onSizeChange={(size) => {
                 setCameraSize(size);
-                void saveCameraSize(size);
+                saveCameraSize(size);
               }}
               cameraError={cameraError}
               onCameraError={setCameraError}
@@ -714,98 +662,71 @@ interface SliderProps {
   onChange: (value: number) => void;
 }
 
-function getHorizontalPercentage(locationX: number, sliderWidth: number) {
-  return Math.max(0, Math.min(100, (locationX / sliderWidth) * 100));
-}
-
-function getSteeringPercentage(locationX: number, sliderWidth: number) {
-  return Math.max(-100, Math.min(100, ((locationX - sliderWidth / 2) / (sliderWidth / 2)) * 100));
-}
-
-function getVerticalPercentage(locationY: number, sliderHeight: number) {
-  return Math.max(-100, Math.min(100, ((sliderHeight / 2 - locationY) / (sliderHeight / 2)) * 100));
-}
-
-function clampCameraLayout(
-  position: { x: number; y: number },
-  size: { width: number; height: number }
-) {
-  const nextWidth = Math.max(150, Math.min(width - 40, size.width));
-  const nextHeight = Math.max(100, Math.min(height - 100, size.height));
-
-  return {
-    size: {
-      width: nextWidth,
-      height: nextHeight,
-    },
-    position: {
-      x: Math.max(0, Math.min(width - nextWidth, position.x)),
-      y: Math.max(0, Math.min(height - nextHeight, position.y)),
-    },
-  };
-}
-
 function ThrottleSlider({ value, onChange }: SliderProps) {
   const sliderHeight = height * 0.45;
-
-  const handleRelease = useCallback(() => {
-    console.log('[Throttle] Released -> reset to 0');
-    onChange(0);
-  }, [onChange]);
-
-  const handleTap = useCallback((event: GestureResponderEvent) => {
-    const percentage = getVerticalPercentage(event.nativeEvent.locationY, sliderHeight);
-    console.log('[Throttle] Press detected:', percentage);
-    onChange(percentage);
-  }, [onChange, sliderHeight]);
+  const sliderRef = useRef<View>(null);
+  const sliderBounds = useRef({ x: 0, y: 0, width: 60, height: sliderHeight });
+  const startY = useRef(0);
 
   const panGesture = Gesture.Pan()
     .runOnJS(true)
     .onBegin((event) => {
-      const percentage = getVerticalPercentage(event.y, sliderHeight);
+      startY.current = event.y;
+      const y = event.y;
+      const percentage = Math.max(
+        -100,
+        Math.min(100, ((sliderHeight / 2 - y) / (sliderHeight / 2)) * 100)
+      );
       onChange(percentage);
-      console.log('[Throttle] Gesture started');
+      console.log(`[Throttle] Gesture started`);
     })
     .onUpdate((event) => {
-      const percentage = getVerticalPercentage(event.y, sliderHeight);
+      const y = event.y;
+      const percentage = Math.max(
+        -100,
+        Math.min(100, ((sliderHeight / 2 - y) / (sliderHeight / 2)) * 100)
+      );
       onChange(percentage);
     })
     .onEnd(() => {
-      console.log('[Throttle] Gesture ended');
+      console.log(`[Throttle] Gesture ended`);
       onChange(0);
     })
     .onFinalize(() => {
-      handleRelease();
+      onChange(0);
     });
 
   return (
     <View style={styles.throttleContainer}>
       <Text style={styles.sliderLabel}>THROTTLE</Text>
       <GestureDetector gesture={panGesture}>
-        <Pressable
-          testID="throttle-slider"
+        <View
+          ref={sliderRef}
           style={[styles.verticalSlider, { height: sliderHeight }]}
-          onPressIn={handleTap}
-          onPressOut={handleRelease}
-          onTouchCancel={handleRelease}
+          onLayout={(event) => {
+            sliderRef.current?.measureInWindow((pageX, pageY) => {
+              sliderBounds.current = { x: pageX, y: pageY, width: 60, height: sliderHeight };
+              console.log(`[Throttle] Layout bounds:`, sliderBounds.current);
+            });
+          }}
         >
-          <View style={styles.sliderCenter} />
-          <View
-            pointerEvents="none"
-            style={[
-              styles.sliderThumb,
-              {
-                top:
-                  sliderHeight / 2 - (value / 100) * (sliderHeight / 2) - 20,
-              },
-            ]}
-          >
-            <LinearGradient
-              colors={value > 0 ? ["#f59e0b", "#d97706"] : ["#ef4444", "#dc2626"]}
-              style={styles.thumbGradient}
-            />
-          </View>
-        </Pressable>
+        <View style={styles.sliderCenter} />
+        <View
+          pointerEvents="none"
+          style={[
+            styles.sliderThumb,
+            {
+              top:
+                sliderHeight / 2 - (value / 100) * (sliderHeight / 2) - 20,
+            },
+          ]}
+        >
+          <LinearGradient
+            colors={value > 0 ? ["#f59e0b", "#d97706"] : ["#ef4444", "#dc2626"]}
+            style={styles.thumbGradient}
+          />
+        </View>
+        </View>
       </GestureDetector>
       <View style={styles.sliderLabels}>
         <Text style={styles.sliderLabelText}>FWD</Text>
@@ -817,63 +738,65 @@ function ThrottleSlider({ value, onChange }: SliderProps) {
 
 function BrakeSlider({ value, onChange }: SliderProps) {
   const sliderWidth = width * 0.45;
-
-  const handleRelease = useCallback(() => {
-    console.log('[Brake] Released -> reset to 0');
-    onChange(0);
-  }, [onChange]);
-
-  const handleTap = useCallback((event: GestureResponderEvent) => {
-    const percentage = getHorizontalPercentage(event.nativeEvent.locationX, sliderWidth);
-    console.log('[Brake] Press detected:', percentage);
-    onChange(percentage);
-  }, [onChange, sliderWidth]);
+  const sliderRef = useRef<View>(null);
+  const sliderBounds = useRef({ x: 0, y: 0, width: sliderWidth, height: 60 });
 
   const panGesture = Gesture.Pan()
     .runOnJS(true)
     .onBegin((event) => {
-      const percentage = getHorizontalPercentage(event.x, sliderWidth);
+      const x = event.x;
+      const percentage = Math.max(
+        0,
+        Math.min(100, (x / sliderWidth) * 100)
+      );
       onChange(percentage);
-      console.log('[Brake] Gesture started');
+      console.log(`[Brake] Gesture started`);
     })
     .onUpdate((event) => {
-      const percentage = getHorizontalPercentage(event.x, sliderWidth);
+      const x = event.x;
+      const percentage = Math.max(
+        0,
+        Math.min(100, (x / sliderWidth) * 100)
+      );
       onChange(percentage);
     })
     .onEnd(() => {
-      console.log('[Brake] Gesture ended');
+      console.log(`[Brake] Gesture ended`);
       onChange(0);
     })
     .onFinalize(() => {
-      handleRelease();
+      onChange(0);
     });
 
   return (
     <View style={styles.brakeContainer}>
       <Text style={styles.sliderLabel}>BRAKE</Text>
       <GestureDetector gesture={panGesture}>
-        <Pressable
-          testID="brake-slider"
+        <View
+          ref={sliderRef}
           style={[styles.horizontalSlider, { width: sliderWidth }]}
-          onPressIn={handleTap}
-          onPressOut={handleRelease}
-          onTouchCancel={handleRelease}
+          onLayout={(event) => {
+            sliderRef.current?.measureInWindow((pageX, pageY) => {
+              sliderBounds.current = { x: pageX, y: pageY, width: sliderWidth, height: 60 };
+              console.log(`[Brake] Layout bounds:`, sliderBounds.current);
+            });
+          }}
         >
-          <View
-            pointerEvents="none"
-            style={[
-              styles.sliderThumb,
-              {
-                left: (value / 100) * sliderWidth - 20,
-              },
-            ]}
-          >
-            <LinearGradient
-              colors={["#ef4444", "#dc2626"]}
-              style={styles.thumbGradient}
-            />
-          </View>
-        </Pressable>
+        <View
+          pointerEvents="none"
+          style={[
+            styles.sliderThumb,
+            {
+              left: (value / 100) * sliderWidth - 20,
+            },
+          ]}
+        >
+          <LinearGradient
+            colors={["#ef4444", "#dc2626"]}
+            style={styles.thumbGradient}
+          />
+        </View>
+        </View>
       </GestureDetector>
       <View style={styles.sliderLabelsHorizontal}>
         <Text style={styles.sliderLabelText}>0%</Text>
@@ -885,64 +808,66 @@ function BrakeSlider({ value, onChange }: SliderProps) {
 
 function SteeringSlider({ value, onChange }: SliderProps) {
   const sliderWidth = width * 0.45;
-
-  const handleRelease = useCallback(() => {
-    console.log('[Steering] Released -> reset to 0');
-    onChange(0);
-  }, [onChange]);
-
-  const handleTap = useCallback((event: GestureResponderEvent) => {
-    const percentage = getSteeringPercentage(event.nativeEvent.locationX, sliderWidth);
-    console.log('[Steering] Press detected:', percentage);
-    onChange(percentage);
-  }, [onChange, sliderWidth]);
+  const sliderRef = useRef<View>(null);
+  const sliderBounds = useRef({ x: 0, y: 0, width: sliderWidth, height: 60 });
 
   const panGesture = Gesture.Pan()
     .runOnJS(true)
     .onBegin((event) => {
-      const percentage = getSteeringPercentage(event.x, sliderWidth);
+      const x = event.x;
+      const percentage = Math.max(
+        -100,
+        Math.min(100, ((x - sliderWidth / 2) / (sliderWidth / 2)) * 100)
+      );
       onChange(percentage);
-      console.log('[Steering] Gesture started');
+      console.log(`[Steering] Gesture started`);
     })
     .onUpdate((event) => {
-      const percentage = getSteeringPercentage(event.x, sliderWidth);
+      const x = event.x;
+      const percentage = Math.max(
+        -100,
+        Math.min(100, ((x - sliderWidth / 2) / (sliderWidth / 2)) * 100)
+      );
       onChange(percentage);
     })
     .onEnd(() => {
-      console.log('[Steering] Gesture ended');
+      console.log(`[Steering] Gesture ended`);
       onChange(0);
     })
     .onFinalize(() => {
-      handleRelease();
+      onChange(0);
     });
 
   return (
     <View style={styles.steeringContainer}>
       <Text style={styles.sliderLabel}>STEERING</Text>
       <GestureDetector gesture={panGesture}>
-        <Pressable
-          testID="steering-slider"
+        <View
+          ref={sliderRef}
           style={[styles.horizontalSlider, { width: sliderWidth }]}
-          onPressIn={handleTap}
-          onPressOut={handleRelease}
-          onTouchCancel={handleRelease}
+          onLayout={(event) => {
+            sliderRef.current?.measureInWindow((pageX, pageY) => {
+              sliderBounds.current = { x: pageX, y: pageY, width: sliderWidth, height: 60 };
+              console.log(`[Steering] Layout bounds:`, sliderBounds.current);
+            });
+          }}
         >
-          <View style={styles.sliderCenter} />
-          <View
-            pointerEvents="none"
-            style={[
-              styles.sliderThumb,
-              {
-                left: sliderWidth / 2 + (value / 100) * (sliderWidth / 2) - 20,
-              },
-            ]}
-          >
-            <LinearGradient
-              colors={["#f59e0b", "#d97706"]}
-              style={styles.thumbGradient}
-            />
-          </View>
-        </Pressable>
+        <View style={styles.sliderCenter} />
+        <View
+          pointerEvents="none"
+          style={[
+            styles.sliderThumb,
+            {
+              left: sliderWidth / 2 + (value / 100) * (sliderWidth / 2) - 20,
+            },
+          ]}
+        >
+          <LinearGradient
+            colors={["#f59e0b", "#d97706"]}
+            style={styles.thumbGradient}
+          />
+        </View>
+        </View>
       </GestureDetector>
       <View style={styles.sliderLabelsHorizontal}>
         <Text style={styles.sliderLabelText}>LEFT</Text>
@@ -972,10 +897,10 @@ function DraggableResizableCamera({
   onPositionChange, 
   size, 
   onSizeChange,
-  cameraError: _cameraError,
+  cameraError,
   onCameraError,
   cameraKey,
-  onRefresh: _onRefresh,
+  onRefresh,
   isFullscreen,
   onFullscreenChange
 }: DraggableResizableCameraProps) {
@@ -1004,41 +929,6 @@ function DraggableResizableCamera({
     onCameraError(false);
   }, [cameraKey, onCameraError]);
 
-  useEffect(() => {
-    const clampedLayout = clampCameraLayout(position, localSize);
-
-    if (
-      clampedLayout.position.x !== position.x ||
-      clampedLayout.position.y !== position.y
-    ) {
-      console.log('📹 Restoring camera window into visible area:', clampedLayout.position);
-      onPositionChange(clampedLayout.position);
-    }
-
-    if (
-      clampedLayout.size.width !== localSize.width ||
-      clampedLayout.size.height !== localSize.height
-    ) {
-      console.log('📹 Restoring camera size:', clampedLayout.size);
-      setLocalSize(clampedLayout.size);
-      onSizeChange(clampedLayout.size);
-    }
-
-    pan.setValue(clampedLayout.position);
-  }, [localSize, onPositionChange, onSizeChange, pan, position]);
-
-  const resetCameraWindow = useCallback(() => {
-    const defaultSize = { width: width * 0.75, height: width * 0.75 * (9 / 16) };
-    const defaultPosition = { x: 20, y: 120 };
-    const clampedLayout = clampCameraLayout(defaultPosition, defaultSize);
-
-    console.log('📹 Resetting camera window:', clampedLayout);
-    setLocalSize(clampedLayout.size);
-    onSizeChange(clampedLayout.size);
-    onPositionChange(clampedLayout.position);
-    pan.setValue(clampedLayout.position);
-  }, [onPositionChange, onSizeChange, pan]);
-
   const dragPanResponder = PanResponder.create({
     onStartShouldSetPanResponder: () => !isResizing,
     onStartShouldSetPanResponderCapture: () => !isResizing,
@@ -1058,12 +948,10 @@ function DraggableResizableCamera({
     ),
     onPanResponderRelease: (_, gesture) => {
       pan.flattenOffset();
-      const clampedLayout = clampCameraLayout(
-        { x: position.x + gesture.dx, y: position.y + gesture.dy },
-        localSize
-      );
-      onPositionChange(clampedLayout.position);
-      pan.setValue(clampedLayout.position);
+      const newX = Math.max(0, Math.min(width - localSize.width, position.x + gesture.dx));
+      const newY = Math.max(0, Math.min(height - localSize.height, position.y + gesture.dy));
+      onPositionChange({ x: newX, y: newY });
+      pan.setValue({ x: newX, y: newY });
     },
   });
 
@@ -1090,20 +978,12 @@ function DraggableResizableCamera({
       setLocalSize({ width: newWidth, height: newHeight });
     },
     onPanResponderRelease: (_, gesture) => {
-      const clampedLayout = clampCameraLayout(position, {
-        width: initialSize.current.width + gesture.dx,
-        height: initialSize.current.height + gesture.dy,
-      });
-      console.log('📏 Resize ended', clampedLayout.size);
-      setLocalSize(clampedLayout.size);
-      onSizeChange(clampedLayout.size);
-      if (
-        clampedLayout.position.x !== position.x ||
-        clampedLayout.position.y !== position.y
-      ) {
-        onPositionChange(clampedLayout.position);
-        pan.setValue(clampedLayout.position);
-      }
+      const finalWidth = Math.max(150, Math.min(width - 40, initialSize.current.width + gesture.dx));
+      const finalHeight = Math.max(100, Math.min(height - 100, initialSize.current.height + gesture.dy));
+      const finalSize = { width: finalWidth, height: finalHeight };
+      console.log('📏 Resize ended', finalSize);
+      setLocalSize(finalSize);
+      onSizeChange(finalSize);
       setIsResizing(false);
     },
   });
@@ -1190,22 +1070,12 @@ function DraggableResizableCamera({
         <View style={styles.cameraHeader}>
           <View style={styles.cameraHeaderLeft} {...dragPanResponder.panHandlers}>
             <Video size={18} color="#f59e0b" />
-            <Text style={styles.cameraLabel}>CAMERA</Text>
           </View>
           <View style={styles.cameraHeaderRight}>
-            <Pressable
-              onPress={resetCameraWindow}
-              style={styles.resetCameraButton}
-              hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
-              testID="reset-camera-window"
-            >
-              <RotateCcw size={16} color="#1a1410" />
-            </Pressable>
             <Pressable 
               onPress={handleFullscreen} 
               style={styles.fullscreenButton}
               hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
-              testID="toggle-camera-fullscreen"
             >
               <Maximize2 size={18} color="#1a1410" />
             </Pressable>
@@ -1641,11 +1511,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700" as const,
     letterSpacing: 1.5,
-  },
-  resetCameraButton: {
-    padding: 8,
-    backgroundColor: "rgba(245, 158, 11, 0.9)",
-    borderRadius: 6,
   },
   fullscreenButton: {
     padding: 8,

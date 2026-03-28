@@ -530,23 +530,48 @@ class RCCarController:
     
     def set_steering_right(self, percentage: float):
         duty_cycle = percentage
-        self.steering_duty = duty_cycle
-        self.steering_direction_right = percentage > 0
-        status_table.update('steering_pwm', duty_cycle)
-        status_table.update('steering_direction_right', percentage > 0)
-        if GPIO_AVAILABLE and self.gpio_chip is not None:
-            lgpio.gpio_write(self.gpio_chip, STEERING_DIRECTION_PIN, 1 if percentage > 0 else 0)
-            lgpio.tx_pwm(self.gpio_chip, STEERING_PWM_PIN, PWM_FREQUENCY, duty_cycle)
+
+        if percentage > 0:
+            self.steering_duty = duty_cycle
+            status_table.update('steering_pwm', duty_cycle)
+            if not self.steering_direction_right:
+                self.steering_direction_right = True
+                status_table.update('steering_direction_right', True)
+                if GPIO_AVAILABLE and self.gpio_chip is not None:
+                    lgpio.gpio_write(self.gpio_chip, STEERING_DIRECTION_PIN, 1)
+            if GPIO_AVAILABLE and self.gpio_chip is not None:
+                lgpio.tx_pwm(self.gpio_chip, STEERING_PWM_PIN, PWM_FREQUENCY, duty_cycle)
+        elif self.steering_direction_right:
+            self.steering_duty = 0
+            self.steering_direction_right = False
+            status_table.update('steering_pwm', 0)
+            status_table.update('steering_direction_right', False)
+            if GPIO_AVAILABLE and self.gpio_chip is not None:
+                lgpio.gpio_write(self.gpio_chip, STEERING_DIRECTION_PIN, 0)
+                lgpio.tx_pwm(self.gpio_chip, STEERING_PWM_PIN, PWM_FREQUENCY, 0)
     
     def set_steering_left(self, percentage: float):
         duty_cycle = percentage
-        self.steering_duty = duty_cycle
-        self.steering_direction_right = False
-        status_table.update('steering_pwm', duty_cycle)
-        status_table.update('steering_direction_right', False)
-        if GPIO_AVAILABLE and self.gpio_chip is not None:
-            lgpio.gpio_write(self.gpio_chip, STEERING_DIRECTION_PIN, 0)
-            lgpio.tx_pwm(self.gpio_chip, STEERING_PWM_PIN, PWM_FREQUENCY, duty_cycle)
+
+        if percentage > 0:
+            self.steering_duty = duty_cycle
+            if self.steering_direction_right:
+                self.steering_direction_right = False
+                status_table.update('steering_direction_right', False)
+                if GPIO_AVAILABLE and self.gpio_chip is not None:
+                    lgpio.gpio_write(self.gpio_chip, STEERING_DIRECTION_PIN, 0)
+            else:
+                status_table.update('steering_direction_right', False)
+            status_table.update('steering_pwm', duty_cycle)
+            if GPIO_AVAILABLE and self.gpio_chip is not None:
+                lgpio.tx_pwm(self.gpio_chip, STEERING_PWM_PIN, PWM_FREQUENCY, duty_cycle)
+        elif not self.steering_direction_right and self.steering_duty > 0:
+            self.steering_duty = 0
+            status_table.update('steering_pwm', 0)
+            status_table.update('steering_direction_right', False)
+            if GPIO_AVAILABLE and self.gpio_chip is not None:
+                lgpio.gpio_write(self.gpio_chip, STEERING_DIRECTION_PIN, 0)
+                lgpio.tx_pwm(self.gpio_chip, STEERING_PWM_PIN, PWM_FREQUENCY, 0)
     
     def set_gear(self, gear: int):
         if 1 <= gear <= 3:

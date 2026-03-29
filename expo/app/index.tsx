@@ -24,6 +24,91 @@ type Gear = 1 | 2 | 3;
 
 const DEFAULT_IP = "";
 
+type ParsedServerTarget = {
+  host: string;
+  port: string | null;
+  isSecure: boolean;
+  isNgrok: boolean;
+};
+
+function parseServerTarget(rawValue: string): ParsedServerTarget {
+  const trimmedValue = rawValue.trim();
+  const normalizedValue = trimmedValue.match(/^https?:\/\//i) || trimmedValue.match(/^wss?:\/\//i)
+    ? trimmedValue
+    : `http://${trimmedValue}`;
+
+  try {
+    const url = new URL(normalizedValue);
+    const host = url.hostname;
+    const port = url.port || null;
+    const isSecure = url.protocol === 'https:' || url.protocol === 'wss:';
+    const isNgrok =
+      host.includes('.ngrok-free.dev') ||
+      host.includes('.ngrok-free.app') ||
+      host.includes('.ngrok.');
+
+    return {
+      host,
+      port,
+      isSecure,
+      isNgrok,
+    };
+  } catch (error) {
+    const fallbackValue = trimmedValue
+      .replace(/^(https?:\/\/)/i, '')
+      .replace(/^(wss?:\/\/)/i, '')
+      .replace(/\/.*$/, '')
+      .replace(/\/+$/, '');
+    const fallbackParts = fallbackValue.split(':');
+    const fallbackHost = fallbackParts[0] ?? '';
+    const fallbackPort = fallbackParts.length > 1 ? fallbackParts[1] ?? null : null;
+    const fallbackIsNgrok =
+      fallbackHost.includes('.ngrok-free.dev') ||
+      fallbackHost.includes('.ngrok-free.app') ||
+      fallbackHost.includes('.ngrok.');
+
+    console.error('Failed to parse server target, using fallback:', error);
+
+    return {
+      host: fallbackHost,
+      port: fallbackPort,
+      isSecure: fallbackIsNgrok,
+      isNgrok: fallbackIsNgrok,
+    };
+  }
+}
+
+function getWebSocketUrl(rawValue: string): string {
+  const target = parseServerTarget(rawValue);
+  const isWebSecure = Platform.OS === 'web' && typeof window !== 'undefined' && window.location.protocol === 'https:';
+  const shouldUseSecureSocket = target.isSecure || target.isNgrok || isWebSecure;
+
+  if (shouldUseSecureSocket) {
+    return `wss://${target.host}/ws`;
+  }
+
+  if (target.port) {
+    return `ws://${target.host}:${target.port}/ws`;
+  }
+
+  return `ws://${target.host}:8765/ws`;
+}
+
+function getCameraUrl(rawValue: string): string {
+  const target = parseServerTarget(rawValue);
+  const shouldUseSecureHttp = target.isSecure || target.isNgrok;
+
+  if (shouldUseSecureHttp) {
+    return `https://${target.host}/camera`;
+  }
+
+  if (target.port) {
+    return `http://${target.host}:${target.port}/camera`;
+  }
+
+  return `http://${target.host}:8765/camera`;
+}
+
 export default function RCCarController() {
   const insets = useSafeAreaInsets();
   const [throttle, setThrottle] = useState<number>(0);
@@ -51,8 +136,8 @@ export default function RCCarController() {
   const lastThrottleDirection = useRef<'forward' | 'backward' | 'stopped'>('stopped');
 
   useEffect(() => {
-    loadSavedIP();
-    loadCameraSettings();
+    void loadSavedIP();
+    void loadCameraSettings();
   }, []);
 
   useEffect(() => {
@@ -143,24 +228,9 @@ export default function RCCarController() {
     }
 
     try {
-      let cleanIP = piIP.trim();
-      cleanIP = cleanIP.replace(/^(https?:\/\/)/i, '');
-      cleanIP = cleanIP.replace(/^(wss?:\/\/)/i, '');
-      cleanIP = cleanIP.replace(/\/+$/, '');
-      
-      let url: string;
-      const isNgrok = cleanIP.includes('.ngrok-free.dev') || cleanIP.includes('.ngrok-free.app') || cleanIP.includes('.ngrok.');
-      const isWebSecure = Platform.OS === 'web' && typeof window !== 'undefined' && window.location.protocol === 'https:';
-      
-      if (isNgrok || isWebSecure) {
-        cleanIP = cleanIP.replace(/:\d+$/, '');
-        url = `wss://${cleanIP}/ws`;
-        console.log(`🔒 Using secure WSS: ${url} (${isNgrok ? 'ngrok detected' : 'HTTPS page'})`);
-      } else if (cleanIP.includes(':')) {
-        url = `ws://${cleanIP}/ws`;
-      } else {
-        url = `ws://${cleanIP}:8765/ws`;
-      }
+      const target = parseServerTarget(piIP);
+      const url = getWebSocketUrl(piIP);
+      console.log('🔍 Parsed server target:', target);
       setConnectionAttempts(prev => {
         console.log(`🔄 Attempt ${prev + 1}: Connecting to ${url}`);
         return prev + 1;
@@ -197,7 +267,7 @@ export default function RCCarController() {
         setIsConnected(false);
         
         if (event.code === 1006) {
-          if (cleanIP.includes('.ngrok')) {
+          if (target.isNgrok) {
             setConnectionError("ngrok connection failed. Is Python server running?");
           } else {
             setConnectionError("Connection failed. Is the server running?");
@@ -239,7 +309,7 @@ export default function RCCarController() {
         console.error(`   URL: ${url}`);
         
         let errorMessage = 'Connection failed';
-        if (cleanIP.includes('.ngrok')) {
+        if (target.isNgrok) {
           errorMessage = 'Unable to connect to ngrok server';
           console.error(`   💡 Troubleshooting steps:`);
           console.error(`   1. Make sure Python server is running on Pi: python3 raspberry-pi-server.py`);
@@ -303,7 +373,7 @@ export default function RCCarController() {
     
     disconnectFromServer();
     setPiIP(trimmedIP);
-    saveIP(trimmedIP);
+    void saveIP(trimmedIP);
     setShowSettings(false);
     setConnectionAttempts(0);
     
@@ -629,12 +699,12 @@ export default function RCCarController() {
               position={cameraPosition}
               onPositionChange={(pos) => {
                 setCameraPosition(pos);
-                saveCameraPosition(pos);
+                void saveCameraPosition(pos);
               }}
               size={cameraSize}
               onSizeChange={(size) => {
                 setCameraSize(size);
-                saveCameraSize(size);
+                void saveCameraSize(size);
               }}
               cameraError={cameraError}
               onCameraError={setCameraError}
@@ -703,7 +773,7 @@ function ThrottleSlider({ value, onChange }: SliderProps) {
         <View
           ref={sliderRef}
           style={[styles.verticalSlider, { height: sliderHeight }]}
-          onLayout={(event) => {
+          onLayout={(_event) => {
             sliderRef.current?.measureInWindow((pageX, pageY) => {
               sliderBounds.current = { x: pageX, y: pageY, width: 60, height: sliderHeight };
               console.log(`[Throttle] Layout bounds:`, sliderBounds.current);
@@ -775,7 +845,7 @@ function BrakeSlider({ value, onChange }: SliderProps) {
         <View
           ref={sliderRef}
           style={[styles.horizontalSlider, { width: sliderWidth }]}
-          onLayout={(event) => {
+          onLayout={(_event) => {
             sliderRef.current?.measureInWindow((pageX, pageY) => {
               sliderBounds.current = { x: pageX, y: pageY, width: sliderWidth, height: 60 };
               console.log(`[Brake] Layout bounds:`, sliderBounds.current);
@@ -845,7 +915,7 @@ function SteeringSlider({ value, onChange }: SliderProps) {
         <View
           ref={sliderRef}
           style={[styles.horizontalSlider, { width: sliderWidth }]}
-          onLayout={(event) => {
+          onLayout={(_event) => {
             sliderRef.current?.measureInWindow((pageX, pageY) => {
               sliderBounds.current = { x: pageX, y: pageY, width: sliderWidth, height: 60 };
               console.log(`[Steering] Layout bounds:`, sliderBounds.current);
@@ -897,10 +967,10 @@ function DraggableResizableCamera({
   onPositionChange, 
   size, 
   onSizeChange,
-  cameraError,
+  cameraError: _cameraError,
   onCameraError,
   cameraKey,
-  onRefresh,
+  onRefresh: _onRefresh,
   isFullscreen,
   onFullscreenChange
 }: DraggableResizableCameraProps) {
@@ -909,20 +979,10 @@ function DraggableResizableCamera({
   const [localSize, setLocalSize] = useState(size);
   const webViewRef = useRef<WebView>(null);
   
-  const cleanIP = piIP.replace(/^(https?:\/\/)/i, '').replace(/^(wss?:\/\/)/i, '').replace(/\/+$/, '');
+  const cameraTarget = parseServerTarget(piIP);
+  const cameraUrl = getCameraUrl(piIP);
   
-  const isNgrok = cleanIP.includes('.ngrok-free.dev') || cleanIP.includes('.ngrok-free.app') || cleanIP.includes('.ngrok.');
-  
-  let cameraUrl: string;
-  if (isNgrok) {
-    const host = cleanIP.replace(/:\d+$/, '');
-    cameraUrl = `https://${host}/camera`;
-  } else if (cleanIP.includes(':')) {
-    cameraUrl = `http://${cleanIP}/camera`;
-  } else {
-    cameraUrl = `http://${cleanIP}:8765/camera`;
-  }
-  
+  console.log('📹 Camera target:', cameraTarget);
   console.log(`📹 Camera URL: ${cameraUrl}`);
   
   useEffect(() => {
@@ -996,57 +1056,46 @@ function DraggableResizableCamera({
     return (
       <View style={styles.fullscreenContainer}>
         <View style={styles.fullscreenCameraView}>
-          {Platform.OS === 'web' ? (
-            <iframe
-              key={cameraKey}
-              src={cameraUrl}
-              style={{
-                width: '100%',
-                height: '100%',
-                border: 'none',
-                backgroundColor: '#000000',
-              }}
-              allow="autoplay"
-            />
-          ) : (
-            <WebView
-              key={cameraKey}
-              ref={webViewRef}
-              source={{ 
-                uri: cameraUrl,
-                headers: {
-                  'ngrok-skip-browser-warning': 'true',
-                  'User-Agent': 'RCCarApp/1.0',
-                }
-              }}
-              style={styles.cameraWebView}
-              onLoad={() => {
-                console.log('✅ Camera WebView loaded');
-                onCameraError(false);
-              }}
-              onLoadEnd={() => {
-                console.log('✅ Camera stream ready');
-              }}
-              onError={(syntheticEvent: any) => {
-                const { nativeEvent } = syntheticEvent;
-                console.error('❌ Camera WebView error:', nativeEvent);
-              }}
-              onHttpError={(syntheticEvent: any) => {
-                const { nativeEvent } = syntheticEvent;
-                console.error('❌ Camera HTTP error:', nativeEvent.statusCode, nativeEvent.url);
-              }}
-              javaScriptEnabled={true}
-              domStorageEnabled={false}
-              startInLoadingState={false}
-              scrollEnabled={false}
-              bounces={false}
-              overScrollMode="never"
-              showsHorizontalScrollIndicator={false}
-              showsVerticalScrollIndicator={false}
-              mediaPlaybackRequiresUserAction={false}
-              allowsInlineMediaPlayback={true}
-            />
-          )}
+          <WebView
+            key={cameraKey}
+            ref={webViewRef}
+            source={{ 
+              uri: cameraUrl,
+              headers: {
+                'ngrok-skip-browser-warning': 'true',
+                'User-Agent': 'RCCarApp/1.0',
+              }
+            }}
+            originWhitelist={["*"]}
+            style={styles.cameraWebView}
+            onLoad={() => {
+              console.log('✅ Camera WebView loaded');
+              onCameraError(false);
+            }}
+            onLoadEnd={() => {
+              console.log('✅ Camera stream ready');
+            }}
+            onError={(syntheticEvent: any) => {
+              const { nativeEvent } = syntheticEvent;
+              console.error('❌ Camera WebView error:', nativeEvent);
+              onCameraError(true);
+            }}
+            onHttpError={(syntheticEvent: any) => {
+              const { nativeEvent } = syntheticEvent;
+              console.error('❌ Camera HTTP error:', nativeEvent.statusCode, nativeEvent.url);
+              onCameraError(true);
+            }}
+            javaScriptEnabled={true}
+            domStorageEnabled={false}
+            startInLoadingState={false}
+            scrollEnabled={false}
+            bounces={false}
+            overScrollMode="never"
+            showsHorizontalScrollIndicator={false}
+            showsVerticalScrollIndicator={false}
+            mediaPlaybackRequiresUserAction={false}
+            allowsInlineMediaPlayback={true}
+          />
         </View>
         <Pressable onPress={handleFullscreen} style={styles.exitFullscreenButton}>
           <Maximize2 size={24} color="#ffffff" />
@@ -1088,59 +1137,48 @@ function DraggableResizableCamera({
           </View>
         </View>
         <View style={[styles.cameraView, { width: localSize.width, height: localSize.height }]}>
-          {Platform.OS === 'web' ? (
-            <iframe
-              key={cameraKey}
-              src={cameraUrl}
-              style={{
-                width: '100%',
-                height: '100%',
-                border: 'none',
-                backgroundColor: '#000000',
-              }}
-              allow="autoplay"
-            />
-          ) : (
-            <WebView
-              key={cameraKey}
-              ref={webViewRef}
-              source={{ 
-                uri: cameraUrl,
-                headers: {
-                  'ngrok-skip-browser-warning': 'true',
-                  'User-Agent': 'RCCarApp/1.0',
-                }
-              }}
-              style={styles.cameraWebView}
-              pointerEvents="none"
-              onLoad={() => {
-                console.log('✅ Camera WebView loaded');
-                onCameraError(false);
-              }}
-              onLoadEnd={() => {
-                console.log('✅ Camera stream ready');
-              }}
-              onError={(syntheticEvent: any) => {
-                const { nativeEvent } = syntheticEvent;
-                console.error('❌ Camera WebView error:', nativeEvent);
-              }}
-              onHttpError={(syntheticEvent: any) => {
-                const { nativeEvent } = syntheticEvent;
-                console.error('❌ Camera HTTP error:', nativeEvent.statusCode, nativeEvent.url);
-              }}
-              javaScriptEnabled={true}
-              domStorageEnabled={false}
-              startInLoadingState={false}
-              scrollEnabled={false}
-              bounces={false}
-              overScrollMode="never"
-              showsHorizontalScrollIndicator={false}
-              showsVerticalScrollIndicator={false}
-              mediaPlaybackRequiresUserAction={false}
-              allowsInlineMediaPlayback={true}
-              mixedContentMode="always"
-            />
-          )}
+          <WebView
+            key={cameraKey}
+            ref={webViewRef}
+            source={{ 
+              uri: cameraUrl,
+              headers: {
+                'ngrok-skip-browser-warning': 'true',
+                'User-Agent': 'RCCarApp/1.0',
+              }
+            }}
+            originWhitelist={["*"]}
+            style={styles.cameraWebView}
+            pointerEvents="none"
+            onLoad={() => {
+              console.log('✅ Camera WebView loaded');
+              onCameraError(false);
+            }}
+            onLoadEnd={() => {
+              console.log('✅ Camera stream ready');
+            }}
+            onError={(syntheticEvent: any) => {
+              const { nativeEvent } = syntheticEvent;
+              console.error('❌ Camera WebView error:', nativeEvent);
+              onCameraError(true);
+            }}
+            onHttpError={(syntheticEvent: any) => {
+              const { nativeEvent } = syntheticEvent;
+              console.error('❌ Camera HTTP error:', nativeEvent.statusCode, nativeEvent.url);
+              onCameraError(true);
+            }}
+            javaScriptEnabled={true}
+            domStorageEnabled={false}
+            startInLoadingState={false}
+            scrollEnabled={false}
+            bounces={false}
+            overScrollMode="never"
+            showsHorizontalScrollIndicator={false}
+            showsVerticalScrollIndicator={false}
+            mediaPlaybackRequiresUserAction={false}
+            allowsInlineMediaPlayback={true}
+            mixedContentMode="always"
+          />
         </View>
       </View>
     </Animated.View>

@@ -98,6 +98,23 @@ PWM_FREQUENCY = 50
 # Connected clients
 connected_clients: Set[web.WebSocketResponse] = set()
 
+@web.middleware
+async def cors_middleware(request, handler):
+    if request.method == 'OPTIONS':
+        response = web.Response(status=204)
+    else:
+        response = await handler(request)
+
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = '*'
+    response.headers['Access-Control-Expose-Headers'] = '*'
+    response.headers['Cross-Origin-Resource-Policy'] = 'cross-origin'
+    response.headers['X-Frame-Options'] = 'ALLOWALL'
+    response.headers['Cache-Control'] = response.headers.get('Cache-Control', 'no-cache, no-store, must-revalidate')
+    return response
+
+
 # Live status table with Tkinter GUI
 class StatusTable:
     """Displays a Tkinter window with a live-updating status table"""
@@ -665,8 +682,15 @@ rc_car = RCCarController()
 
 async def websocket_handler(request):
     """Handle WebSocket client connection using aiohttp"""
-    ws = web.WebSocketResponse()
+    ws = web.WebSocketResponse(
+        heartbeat=20,
+        autoclose=True,
+        autoping=True,
+        compress=False,
+        max_msg_size=1024 * 1024,
+    )
     await ws.prepare(request)
+    logger.info(f"🔌 WebSocket connected from {request.remote} | Origin: {request.headers.get('Origin', 'unknown')}")
     
     client_address = request.remote
     connected_clients.add(ws)
@@ -770,6 +794,20 @@ async def stream_handler(request):
     
     return response
 
+async def health_handler(request):
+    """Health and debug endpoint for remote troubleshooting"""
+    camera_ok = camera_streamer is not None and camera_streamer.camera_process is not None and camera_streamer.get_frame() is not None
+    payload = {
+        'ok': True,
+        'clients': len(connected_clients),
+        'camera_available': CAMERA_AVAILABLE,
+        'camera_running': camera_streamer is not None and camera_streamer.camera_process is not None,
+        'camera_has_frame': camera_ok,
+        'gpio_available': GPIO_AVAILABLE,
+        'port': 8765,
+    }
+    return web.json_response(payload)
+
 async def root_handler(request):
     """Root handler - info page"""
     camera_status = "✅ Active (Pi Camera Module 3)" if (camera_streamer and camera_streamer.camera_process) else "❌ Not Available"
@@ -844,9 +882,11 @@ async def root_handler(request):
 
 async def start_combined_server():
     """Start combined HTTP/WebSocket server on port 8765"""
-    app = web.Application()
+    app = web.Application(middlewares=[cors_middleware])
+    app.router.add_route('OPTIONS', '/{tail:.*}', lambda request: web.Response(status=204))
     app.router.add_get('/camera', stream_handler)
     app.router.add_get('/camera-info', root_handler)
+    app.router.add_get('/health', health_handler)
     app.router.add_get('/ws', websocket_handler)
     app.router.add_get('/', root_handler)
     
@@ -889,9 +929,11 @@ async def start_ngrok():
             import urllib.request
             with urllib.request.urlopen('http://localhost:4040/api/tunnels') as response:
                 data = json.loads(response.read())
-                if data.get('tunnels'):
-                    public_url = data['tunnels'][0]['public_url']
-                    # Extract hostname from URL
+                tunnels = data.get('tunnels', [])
+                if tunnels:
+                    https_tunnel = next((t for t in tunnels if t.get('public_url', '').startswith('https://')), None)
+                    selected_tunnel = https_tunnel or tunnels[0]
+                    public_url = selected_tunnel['public_url']
                     hostname = public_url.replace('https://', '').replace('http://', '')
                     logger.info(f"✅ ngrok tunnel active: {hostname}")
                     return hostname
@@ -958,8 +1000,12 @@ async def main():
     }
 
     logger.info(f"Server running on http://{local_ip}:8765")
+    logger.info(f"Health endpoint: http://{local_ip}:8765/health")
     if ngrok_url:
         logger.info(f"ngrok tunnel: {ngrok_url}")
+        logger.info(f"ngrok camera: https://{ngrok_url}/camera")
+        logger.info(f"ngrok websocket: wss://{ngrok_url}/ws")
+        logger.info(f"ngrok health: https://{ngrok_url}/health")
     logging.disable(logging.CRITICAL)
 
     status_table.init_table(camera_ok, server_info)

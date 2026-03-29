@@ -757,10 +757,19 @@ async def stream_handler(request):
     
     logger.info(f"Camera stream started for client {request.remote}")
     
-    response = web.StreamResponse()
-    response.content_type = 'multipart/x-mixed-replace; boundary=FRAME'
-    response.headers['Cache-Control'] = 'no-cache'
-    response.headers['Connection'] = 'close'
+    response = web.StreamResponse(
+        status=200,
+        reason='OK',
+        headers={
+            'Content-Type': 'multipart/x-mixed-replace; boundary=FRAME',
+            'Cache-Control': 'no-cache, no-store, must-revalidate, private',
+            'Pragma': 'no-cache',
+            'Expires': '0',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no',
+            'Access-Control-Allow-Origin': '*',
+        },
+    )
     await response.prepare(request)
     
     frame_count = 0
@@ -769,7 +778,6 @@ async def stream_handler(request):
         while True:
             frame = camera_streamer.get_frame()
             
-            # Only send if we have a new frame
             if frame and frame != last_frame:
                 frame_count += 1
                 last_frame = frame
@@ -780,19 +788,75 @@ async def stream_handler(request):
                 await response.write(
                     b'--FRAME\r\n'
                     b'Content-Type: image/jpeg\r\n'
-                    b'Content-Length: ' + str(len(frame)).encode() + b'\r\n\r\n' + 
+                    b'Content-Length: ' + str(len(frame)).encode() + b'\r\n'
+                    b'Cache-Control: no-cache, no-store, must-revalidate\r\n\r\n' +
                     frame + b'\r\n'
                 )
+                await response.drain()
             
-            await asyncio.sleep(0.033)  # ~30 FPS
-    except (asyncio.CancelledError, ConnectionResetError):
+            await asyncio.sleep(0.033)
+    except (asyncio.CancelledError, ConnectionResetError, BrokenPipeError):
         logger.info(f"Camera stream closed for client {request.remote} (streamed {frame_count} frames)")
     except Exception as e:
         logger.error(f"Stream error for {request.remote}: {e}")
     finally:
-        await response.write_eof()
+        try:
+            await response.write_eof()
+        except Exception as eof_error:
+            logger.info(f"Camera stream eof skipped for client {request.remote}: {eof_error}")
     
     return response
+
+async def camera_view_handler(request):
+    """Simple HTML viewer that renders the MJPEG stream reliably in WebView/browser"""
+    stream_url = '/camera'
+    html = f"""
+    <html>
+    <head>
+        <title>RC Car Camera Viewer</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+        <style>
+            html, body {{
+                margin: 0;
+                padding: 0;
+                background: #000;
+                width: 100%;
+                height: 100%;
+                overflow: hidden;
+            }}
+            body {{
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }}
+            img {{
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+                background: #000;
+            }}
+            .fallback {{
+                position: fixed;
+                inset: 0;
+                display: none;
+                align-items: center;
+                justify-content: center;
+                color: #fff;
+                font-family: Arial, sans-serif;
+                background: #111;
+                text-align: center;
+                padding: 24px;
+                box-sizing: border-box;
+            }}
+        </style>
+    </head>
+    <body>
+        <img src="{stream_url}" alt="RC Car Camera Feed" onerror="document.getElementById('fallback').style.display='flex'" />
+        <div id="fallback" class="fallback">Camera feed unavailable. Check Raspberry Pi camera and reopen stream.</div>
+    </body>
+    </html>
+    """
+    return web.Response(text=html, content_type='text/html')
 
 async def health_handler(request):
     """Health and debug endpoint for remote troubleshooting"""
@@ -885,6 +949,7 @@ async def start_combined_server():
     app = web.Application(middlewares=[cors_middleware])
     app.router.add_route('OPTIONS', '/{tail:.*}', lambda request: web.Response(status=204))
     app.router.add_get('/camera', stream_handler)
+    app.router.add_get('/camera-view', camera_view_handler)
     app.router.add_get('/camera-info', root_handler)
     app.router.add_get('/health', health_handler)
     app.router.add_get('/ws', websocket_handler)

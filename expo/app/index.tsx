@@ -94,7 +94,22 @@ function getWebSocketUrl(rawValue: string): string {
   return `ws://${target.host}:8765/ws`;
 }
 
-function getCameraUrl(rawValue: string): string {
+function getCameraViewerUrl(rawValue: string): string {
+  const target = parseServerTarget(rawValue);
+  const shouldUseSecureHttp = target.isSecure || target.isNgrok;
+
+  if (shouldUseSecureHttp) {
+    return `https://${target.host}/camera-view`;
+  }
+
+  if (target.port) {
+    return `http://${target.host}:${target.port}/camera-view`;
+  }
+
+  return `http://${target.host}:8765/camera-view`;
+}
+
+function getCameraStreamUrl(rawValue: string): string {
   const target = parseServerTarget(rawValue);
   const shouldUseSecureHttp = target.isSecure || target.isNgrok;
 
@@ -980,10 +995,12 @@ function DraggableResizableCamera({
   const webViewRef = useRef<WebView>(null);
   
   const cameraTarget = parseServerTarget(piIP);
-  const cameraUrl = getCameraUrl(piIP);
+  const cameraViewerUrl = getCameraViewerUrl(piIP);
+  const cameraStreamUrl = getCameraStreamUrl(piIP);
   
   console.log('📹 Camera target:', cameraTarget);
-  console.log(`📹 Camera URL: ${cameraUrl}`);
+  console.log(`📹 Camera viewer URL: ${cameraViewerUrl}`);
+  console.log(`📹 Camera stream URL: ${cameraStreamUrl}`);
   
   useEffect(() => {
     onCameraError(false);
@@ -1060,7 +1077,7 @@ function DraggableResizableCamera({
             key={cameraKey}
             ref={webViewRef}
             source={{ 
-              uri: cameraUrl,
+              uri: cameraViewerUrl,
               headers: {
                 'ngrok-skip-browser-warning': 'true',
                 'User-Agent': 'RCCarApp/1.0',
@@ -1069,20 +1086,20 @@ function DraggableResizableCamera({
             originWhitelist={["*"]}
             style={styles.cameraWebView}
             onLoad={() => {
-              console.log('✅ Camera WebView loaded');
+              console.log('✅ Camera viewer loaded');
               onCameraError(false);
             }}
             onLoadEnd={() => {
-              console.log('✅ Camera stream ready');
+              console.log('✅ Camera viewer ready');
             }}
             onError={(syntheticEvent: any) => {
               const { nativeEvent } = syntheticEvent;
-              console.error('❌ Camera WebView error:', nativeEvent);
+              console.error('❌ Camera viewer error:', nativeEvent);
               onCameraError(true);
             }}
             onHttpError={(syntheticEvent: any) => {
               const { nativeEvent } = syntheticEvent;
-              console.error('❌ Camera HTTP error:', nativeEvent.statusCode, nativeEvent.url);
+              console.error('❌ Camera viewer HTTP error:', nativeEvent.statusCode, nativeEvent.url);
               onCameraError(true);
             }}
             javaScriptEnabled={true}
@@ -1141,7 +1158,7 @@ function DraggableResizableCamera({
             key={cameraKey}
             ref={webViewRef}
             source={{ 
-              uri: cameraUrl,
+              uri: cameraViewerUrl,
               headers: {
                 'ngrok-skip-browser-warning': 'true',
                 'User-Agent': 'RCCarApp/1.0',
@@ -1151,20 +1168,20 @@ function DraggableResizableCamera({
             style={styles.cameraWebView}
             pointerEvents="none"
             onLoad={() => {
-              console.log('✅ Camera WebView loaded');
+              console.log('✅ Camera viewer loaded');
               onCameraError(false);
             }}
             onLoadEnd={() => {
-              console.log('✅ Camera stream ready');
+              console.log('✅ Camera viewer ready');
             }}
             onError={(syntheticEvent: any) => {
               const { nativeEvent } = syntheticEvent;
-              console.error('❌ Camera WebView error:', nativeEvent);
+              console.error('❌ Camera viewer error:', nativeEvent);
               onCameraError(true);
             }}
             onHttpError={(syntheticEvent: any) => {
               const { nativeEvent } = syntheticEvent;
-              console.error('❌ Camera HTTP error:', nativeEvent.statusCode, nativeEvent.url);
+              console.error('❌ Camera viewer HTTP error:', nativeEvent.statusCode, nativeEvent.url);
               onCameraError(true);
             }}
             javaScriptEnabled={true}

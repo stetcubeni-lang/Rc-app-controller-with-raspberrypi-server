@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import type { ComponentProps } from "react";
 import {
   View,
   Text,
@@ -1069,50 +1070,94 @@ function DraggableResizableCamera({
     onFullscreenChange(!isFullscreen);
   };
 
+  const handleCameraLoad = useCallback(() => {
+    console.log('✅ Camera viewer loaded');
+    onCameraError(false);
+  }, [onCameraError]);
+
+  const handleCameraLoadEnd = useCallback(() => {
+    console.log('✅ Camera viewer ready');
+  }, []);
+
+  const handleCameraError = useCallback((error: unknown) => {
+    console.error('❌ Camera viewer error:', error);
+    onCameraError(true);
+  }, [onCameraError]);
+
+  const renderWebCamera = useCallback((isInteractive: boolean) => {
+    const iframeProps: ComponentProps<'iframe'> = {
+      key: `camera-iframe-${cameraKey}`,
+      src: cameraViewerUrl,
+      style: {
+        width: '100%',
+        height: '100%',
+        border: '0px',
+        backgroundColor: '#000000',
+        pointerEvents: isInteractive ? 'auto' : 'none',
+      },
+      allow: 'autoplay; fullscreen',
+      loading: 'eager',
+      referrerPolicy: 'no-referrer',
+      onLoad: handleCameraLoad,
+    };
+
+    return React.createElement('iframe', iframeProps);
+  }, [cameraKey, cameraViewerUrl, handleCameraLoad]);
+
+  const renderNativeCamera = useCallback((isInteractive: boolean) => {
+    return (
+      <WebView
+        key={cameraKey}
+        ref={webViewRef}
+        source={{ 
+          uri: cameraViewerUrl,
+          headers: {
+            'ngrok-skip-browser-warning': 'true',
+            'User-Agent': 'RCCarApp/1.0',
+          }
+        }}
+        originWhitelist={["*"]}
+        style={styles.cameraWebView}
+        pointerEvents={isInteractive ? 'auto' : 'none'}
+        onLoad={handleCameraLoad}
+        onLoadEnd={handleCameraLoadEnd}
+        onError={(syntheticEvent: any) => {
+          const { nativeEvent } = syntheticEvent;
+          handleCameraError(nativeEvent);
+        }}
+        onHttpError={(syntheticEvent: any) => {
+          const { nativeEvent } = syntheticEvent;
+          console.error('❌ Camera viewer HTTP error:', nativeEvent.statusCode, nativeEvent.url);
+          onCameraError(true);
+        }}
+        javaScriptEnabled={true}
+        domStorageEnabled={false}
+        startInLoadingState={false}
+        scrollEnabled={false}
+        bounces={false}
+        overScrollMode="never"
+        showsHorizontalScrollIndicator={false}
+        showsVerticalScrollIndicator={false}
+        mediaPlaybackRequiresUserAction={false}
+        allowsInlineMediaPlayback={true}
+        mixedContentMode="always"
+      />
+    );
+  }, [cameraKey, cameraViewerUrl, handleCameraError, handleCameraLoad, handleCameraLoadEnd, onCameraError]);
+
+  const renderCameraSurface = useCallback((isInteractive: boolean) => {
+    if (Platform.OS === 'web') {
+      return renderWebCamera(isInteractive);
+    }
+
+    return renderNativeCamera(isInteractive);
+  }, [renderNativeCamera, renderWebCamera]);
+
   if (isFullscreen) {
     return (
       <View style={styles.fullscreenContainer}>
         <View style={styles.fullscreenCameraView}>
-          <WebView
-            key={cameraKey}
-            ref={webViewRef}
-            source={{ 
-              uri: cameraViewerUrl,
-              headers: {
-                'ngrok-skip-browser-warning': 'true',
-                'User-Agent': 'RCCarApp/1.0',
-              }
-            }}
-            originWhitelist={["*"]}
-            style={styles.cameraWebView}
-            onLoad={() => {
-              console.log('✅ Camera viewer loaded');
-              onCameraError(false);
-            }}
-            onLoadEnd={() => {
-              console.log('✅ Camera viewer ready');
-            }}
-            onError={(syntheticEvent: any) => {
-              const { nativeEvent } = syntheticEvent;
-              console.error('❌ Camera viewer error:', nativeEvent);
-              onCameraError(true);
-            }}
-            onHttpError={(syntheticEvent: any) => {
-              const { nativeEvent } = syntheticEvent;
-              console.error('❌ Camera viewer HTTP error:', nativeEvent.statusCode, nativeEvent.url);
-              onCameraError(true);
-            }}
-            javaScriptEnabled={true}
-            domStorageEnabled={false}
-            startInLoadingState={false}
-            scrollEnabled={false}
-            bounces={false}
-            overScrollMode="never"
-            showsHorizontalScrollIndicator={false}
-            showsVerticalScrollIndicator={false}
-            mediaPlaybackRequiresUserAction={false}
-            allowsInlineMediaPlayback={true}
-          />
+          {renderCameraSurface(true)}
         </View>
         <Pressable onPress={handleFullscreen} style={styles.exitFullscreenButton}>
           <Maximize2 size={24} color="#ffffff" />
@@ -1154,48 +1199,7 @@ function DraggableResizableCamera({
           </View>
         </View>
         <View style={[styles.cameraView, { width: localSize.width, height: localSize.height }]}>
-          <WebView
-            key={cameraKey}
-            ref={webViewRef}
-            source={{ 
-              uri: cameraViewerUrl,
-              headers: {
-                'ngrok-skip-browser-warning': 'true',
-                'User-Agent': 'RCCarApp/1.0',
-              }
-            }}
-            originWhitelist={["*"]}
-            style={styles.cameraWebView}
-            pointerEvents="none"
-            onLoad={() => {
-              console.log('✅ Camera viewer loaded');
-              onCameraError(false);
-            }}
-            onLoadEnd={() => {
-              console.log('✅ Camera viewer ready');
-            }}
-            onError={(syntheticEvent: any) => {
-              const { nativeEvent } = syntheticEvent;
-              console.error('❌ Camera viewer error:', nativeEvent);
-              onCameraError(true);
-            }}
-            onHttpError={(syntheticEvent: any) => {
-              const { nativeEvent } = syntheticEvent;
-              console.error('❌ Camera viewer HTTP error:', nativeEvent.statusCode, nativeEvent.url);
-              onCameraError(true);
-            }}
-            javaScriptEnabled={true}
-            domStorageEnabled={false}
-            startInLoadingState={false}
-            scrollEnabled={false}
-            bounces={false}
-            overScrollMode="never"
-            showsHorizontalScrollIndicator={false}
-            showsVerticalScrollIndicator={false}
-            mediaPlaybackRequiresUserAction={false}
-            allowsInlineMediaPlayback={true}
-            mixedContentMode="always"
-          />
+          {renderCameraSurface(false)}
         </View>
       </View>
     </Animated.View>

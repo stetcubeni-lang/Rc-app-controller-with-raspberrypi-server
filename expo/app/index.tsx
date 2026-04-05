@@ -11,6 +11,8 @@ import {
   Platform,
   Animated,
   PanResponder,
+  AppState,
+  type AppStateStatus,
 } from "react-native";
 import { WebView } from 'react-native-webview';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
@@ -150,6 +152,7 @@ export default function RCCarController() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastThrottleDirection = useRef<'forward' | 'backward' | 'stopped'>('stopped');
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
 
   useEffect(() => {
     void loadSavedIP();
@@ -226,6 +229,51 @@ export default function RCCarController() {
     }
   };
 
+  const applyServerState = useCallback((data: Record<string, unknown>) => {
+    console.log('🔄 Applying server state:', data);
+
+    if (typeof data.throttle_pwm === 'number') {
+      const nextThrottle = typeof data.direction_active === 'boolean' && data.direction_active
+        ? -data.throttle_pwm
+        : data.throttle_pwm;
+      setThrottle(nextThrottle);
+    }
+
+    if (typeof data.brake === 'number') {
+      setBrake(data.brake);
+    }
+
+    if (typeof data.steering_position === 'string') {
+      if (data.steering_position === 'right' && typeof data.steering_pwm === 'number') {
+        setSteering(data.steering_pwm);
+      } else if (data.steering_position === 'left' && typeof data.steering_pwm === 'number') {
+        setSteering(-data.steering_pwm);
+      } else if (data.steering_position === 'center') {
+        setSteering(0);
+      }
+    }
+
+    if (typeof data.gear === 'number' && (data.gear === 1 || data.gear === 2 || data.gear === 3)) {
+      setGear(data.gear);
+    }
+
+    if (typeof data.lights === 'boolean') {
+      setLightsOn(data.lights);
+    }
+
+    if (typeof data.auto_mode === 'boolean') {
+      setAutoMode(data.auto_mode);
+    }
+  }, []);
+
+  const requestServerState = useCallback(() => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      const message = JSON.stringify({ type: "get_state" });
+      wsRef.current.send(message);
+      console.log('📡 Requested latest server state');
+    }
+  }, []);
+
   const connectToServer = useCallback(() => {
     if (!piIP || piIP.trim() === "") {
       setConnectionError("Please set Raspberry Pi IP address in settings");
@@ -263,13 +311,18 @@ export default function RCCarController() {
           clearTimeout(reconnectTimeoutRef.current);
           reconnectTimeoutRef.current = null;
         }
+        requestServerState();
       };
 
       ws.onmessage = (event) => {
         try {
           if (typeof event.data === 'string' && event.data.trim().startsWith('{')) {
-            const data = JSON.parse(event.data);
+            const data = JSON.parse(event.data) as Record<string, unknown>;
             console.log('Received from server:', data);
+
+            if (data.type === 'state') {
+              applyServerState(data);
+            }
           } else {
             console.log('Received non-JSON message:', event.data);
           }
@@ -349,7 +402,7 @@ export default function RCCarController() {
       setIsConnected(false);
       setConnectionError("Failed to create connection");
     }
-  }, [piIP]);
+  }, [applyServerState, piIP, requestServerState]);
 
   const disconnectFromServer = useCallback(() => {
     if (reconnectTimeoutRef.current) {
@@ -379,6 +432,27 @@ export default function RCCarController() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [piIP, connectToServer]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      const previousAppState = appStateRef.current;
+      appStateRef.current = nextAppState;
+      console.log(`📱 AppState changed: ${previousAppState} -> ${nextAppState}`);
+
+      if (nextAppState === 'active' && previousAppState !== 'active') {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          requestServerState();
+        } else {
+          disconnectFromServer();
+          connectToServer();
+        }
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [connectToServer, disconnectFromServer, requestServerState]);
 
   const handleSaveSettings = () => {
     const trimmedIP = tempIP.trim();
@@ -444,6 +518,12 @@ export default function RCCarController() {
       sendCommand("steering_right", 0);
       sendCommand("steering_left", Math.abs(value));
     }
+  };
+
+  const handleSteeringRelease = () => {
+    console.log('🎯 Steering released, returning to center');
+    setSteering(0);
+    sendCommand("steering_center", true);
   };
 
   const handleHonkPress = () => {
@@ -735,7 +815,7 @@ export default function RCCarController() {
           <ThrottleSlider value={throttle} onChange={handleThrottleChange} />
           <View style={styles.rightControls}>
             <BrakeSlider value={brake} onChange={handleBrakeChange} />
-            <SteeringSlider value={steering} onChange={handleSteeringChange} />
+            <SteeringSlider value={steering} onChange={handleSteeringChange} onRelease={handleSteeringRelease} />
           </View>
         </View>
         </View>
@@ -746,6 +826,7 @@ export default function RCCarController() {
 interface SliderProps {
   value: number;
   onChange: (value: number) => void;
+  onRelease?: () => void;
 }
 
 function ThrottleSlider({ value, onChange }: SliderProps) {
@@ -892,12 +973,13 @@ function BrakeSlider({ value, onChange }: SliderProps) {
   );
 }
 
-function SteeringSlider({ value, onChange }: SliderProps) {
-  const sliderWidth = width * 0.45;
+function SteeringSlider({ value, onChange, onRelease }: SliderProps) {
+  const sliderWidth = width * 0.62;
   const sliderRef = useRef<View>(null);
   const sliderBounds = useRef({ x: 0, y: 0, width: sliderWidth, height: 60 });
 
   const panGesture = Gesture.Pan()
+    .minDistance(0)
     .runOnJS(true)
     .onBegin((event) => {
       const x = event.x;
@@ -919,9 +1001,11 @@ function SteeringSlider({ value, onChange }: SliderProps) {
     .onEnd(() => {
       console.log(`[Steering] Gesture ended`);
       onChange(0);
+      onRelease?.();
     })
     .onFinalize(() => {
       onChange(0);
+      onRelease?.();
     });
 
   return (

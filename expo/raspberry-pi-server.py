@@ -83,6 +83,7 @@ THROTTLE_PWM_PIN = 18       # PWM: Throttle speed (0-100%, both directions)
 DIRECTION_PIN = 19          # Digital: Direction (HIGH = backward, LOW = forward)
 STEERING_DIRECTION_PIN = 20 # Digital: Steering direction (HIGH = right, LOW = left/center)
 STEERING_PWM_PIN = 21       # PWM: Steering strength (0-100%)
+STEERING_CENTER_INPUT_PIN = 24 # Digital input: HIGH when wheels are centered/forward
 LIGHTS_PIN = 17             # Digital: Lights on/off
 AUTO_PIN = 27               # Digital: Auto mode on/off
 BRAKE_PIN = 22              # PWM: Brake control (0-100%)
@@ -130,6 +131,8 @@ class StatusTable:
             'direction': False,
             'steering_pwm': 0.0,
             'steering_direction_right': False,
+            'steering_position': 'center',
+            'steering_center_input': False,
             'brake': 0.0,
             'lights': False,
             'auto_mode': False,
@@ -196,17 +199,19 @@ class StatusTable:
             lbl.grid(row=0, column=col, sticky='nsew', padx=1, pady=1)
 
         rows = [
-            ('Throttle Speed',    f'GPIO {THROTTLE_PWM_PIN}',      'PWM',     'throttle_pwm'),
-            ('Direction (BWD)',    f'GPIO {DIRECTION_PIN}',           'Digital', 'direction'),
-            ('Steering Direction', f'GPIO {STEERING_DIRECTION_PIN}',   'Digital', 'steering_direction_right'),
-            ('Steering PWM',       f'GPIO {STEERING_PWM_PIN}',         'PWM',     'steering_pwm'),
-            ('Brake',              f'GPIO {BRAKE_PIN}',               'PWM',     'brake'),
-            ('Lights',            f'GPIO {LIGHTS_PIN}',            'Digital', 'lights'),
-            ('Auto Mode',         f'GPIO {AUTO_PIN}',              'Digital', 'auto_mode'),
-            ('Honk',              f'GPIO {HONK_PIN}',              'Digital', 'honk'),
-            ('Gear 1 (default)',  'No pin',                        'Default', 'gear_1'),
-            ('Gear 2',            f'GPIO {GEAR_2_PIN}',            'Digital', 'gear_2'),
-            ('Gear 3',            f'GPIO {GEAR_3_PIN}',            'Digital', 'gear_3'),
+            ('Throttle Speed',     f'GPIO {THROTTLE_PWM_PIN}',          'PWM',     'throttle_pwm'),
+            ('Direction (BWD)',    f'GPIO {DIRECTION_PIN}',             'Digital', 'direction'),
+            ('Steering Direction', f'GPIO {STEERING_DIRECTION_PIN}',    'Digital', 'steering_direction_right'),
+            ('Steering PWM',       f'GPIO {STEERING_PWM_PIN}',          'PWM',     'steering_pwm'),
+            ('Steering Position',  'Tracked',                           'State',   'steering_position'),
+            ('Steering Center In', f'GPIO {STEERING_CENTER_INPUT_PIN}', 'Input',   'steering_center_input'),
+            ('Brake',              f'GPIO {BRAKE_PIN}',                 'PWM',     'brake'),
+            ('Lights',             f'GPIO {LIGHTS_PIN}',                'Digital', 'lights'),
+            ('Auto Mode',          f'GPIO {AUTO_PIN}',                  'Digital', 'auto_mode'),
+            ('Honk',               f'GPIO {HONK_PIN}',                  'Digital', 'honk'),
+            ('Gear 1 (default)',   'No pin',                            'Default', 'gear_1'),
+            ('Gear 2',             f'GPIO {GEAR_2_PIN}',                'Digital', 'gear_2'),
+            ('Gear 3',             f'GPIO {GEAR_3_PIN}',                'Digital', 'gear_3'),
         ]
 
         for i, (name, pin, typ, key) in enumerate(rows, start=1):
@@ -259,6 +264,8 @@ class StatusTable:
         if key == 'direction':    return 'BWD' if v['direction'] else 'FWD'
         if key == 'steering_direction_right': return 'RIGHT' if v['steering_direction_right'] else 'LEFT/CENTER'
         if key == 'steering_pwm': return f"{v['steering_pwm']:.1f}%"
+        if key == 'steering_position': return str(v['steering_position']).upper()
+        if key == 'steering_center_input': return 'HIGH' if v['steering_center_input'] else 'LOW'
         if key == 'brake':          return f"{v['brake']:.1f}%"
         if key == 'lights':         return 'ON' if v['lights'] else 'OFF'
         if key == 'auto_mode':      return 'ON' if v['auto_mode'] else 'OFF'
@@ -272,8 +279,10 @@ class StatusTable:
         v = self.values
         if key in ('throttle_pwm', 'steering_pwm', 'brake'):
             return 'ValueOn.TLabel' if v.get(key, 0) > 0 else 'ValueOff.TLabel'
-        if key in ('direction', 'steering_direction_right'):
+        if key in ('direction', 'steering_direction_right', 'steering_center_input'):
             return 'ValueOn.TLabel' if v[key] else 'ValueOff.TLabel'
+        if key == 'steering_position':
+            return 'ValueOn.TLabel' if v['steering_position'] != 'center' else 'ValueOff.TLabel'
         if key == 'lights':    return 'ValueOn.TLabel' if v['lights'] else 'ValueOff.TLabel'
         if key == 'auto_mode': return 'ValueOn.TLabel' if v['auto_mode'] else 'ValueOff.TLabel'
         if key == 'honk':      return 'ValueOn.TLabel' if v['honk'] else 'ValueOff.TLabel'
@@ -450,7 +459,13 @@ class RCCarController:
         self.direction_active = False
         self.steering_duty = 0
         self.steering_direction_right = False
+        self.steering_position = 'center'
+        self.steering_center_input = False
+        self.steering_centering = False
         self.brake_duty = 0
+        self._steering_worker_running = True
+        self._steering_worker = threading.Thread(target=self._steering_worker_loop, daemon=True)
+        self._steering_worker.start()
         
         if GPIO_AVAILABLE:
             self.setup_gpio()
@@ -466,6 +481,7 @@ class RCCarController:
             lgpio.gpio_claim_output(self.gpio_chip, DIRECTION_PIN)
             lgpio.gpio_claim_output(self.gpio_chip, STEERING_DIRECTION_PIN)
             lgpio.gpio_claim_output(self.gpio_chip, STEERING_PWM_PIN)
+            lgpio.gpio_claim_input(self.gpio_chip, STEERING_CENTER_INPUT_PIN)
             lgpio.gpio_claim_output(self.gpio_chip, LIGHTS_PIN)
             lgpio.gpio_claim_output(self.gpio_chip, AUTO_PIN)
             lgpio.gpio_claim_output(self.gpio_chip, BRAKE_PIN)
@@ -484,12 +500,74 @@ class RCCarController:
             lgpio.gpio_write(self.gpio_chip, HONK_PIN, 0)
             lgpio.gpio_write(self.gpio_chip, GEAR_2_PIN, 0)
             lgpio.gpio_write(self.gpio_chip, GEAR_3_PIN, 0)
+            self._update_steering_center_input()
             
             logger.info("GPIO initialized successfully on gpiochip4 (Pi 5)")
         except Exception as e:
             logger.error(f"Failed to initialize GPIO: {e}")
             self.gpio_chip = None
     
+    def _steering_worker_loop(self):
+        while self._steering_worker_running:
+            try:
+                self._update_steering_center_input()
+                if self.steering_centering:
+                    self._process_steering_centering()
+            except Exception as e:
+                logger.error(f"Steering worker error: {e}")
+            time.sleep(0.05)
+
+    def _update_steering_center_input(self) -> bool:
+        center_active = False
+        if GPIO_AVAILABLE and self.gpio_chip is not None:
+            try:
+                center_active = bool(lgpio.gpio_read(self.gpio_chip, STEERING_CENTER_INPUT_PIN))
+            except Exception as e:
+                logger.error(f"Failed to read steering center input: {e}")
+        else:
+            center_active = self.steering_position == 'center'
+
+        self.steering_center_input = center_active
+        status_table.update('steering_center_input', center_active)
+        return center_active
+
+    def _stop_steering(self):
+        self.steering_duty = 0
+        self.steering_centering = False
+        status_table.update('steering_pwm', 0)
+        if GPIO_AVAILABLE and self.gpio_chip is not None:
+            lgpio.gpio_write(self.gpio_chip, STEERING_DIRECTION_PIN, 0)
+            lgpio.tx_pwm(self.gpio_chip, STEERING_PWM_PIN, PWM_FREQUENCY, 0)
+
+    def _process_steering_centering(self):
+        if self._update_steering_center_input():
+            self.steering_position = 'center'
+            self.steering_direction_right = False
+            status_table.update('steering_position', 'center')
+            status_table.update('steering_direction_right', False)
+            self._stop_steering()
+            logger.info("Steering centered via digital input")
+            return
+
+        centering_pwm = 35
+        self.steering_duty = centering_pwm
+        status_table.update('steering_pwm', centering_pwm)
+
+        if self.steering_position == 'right':
+            self.steering_direction_right = False
+            status_table.update('steering_direction_right', False)
+            if GPIO_AVAILABLE and self.gpio_chip is not None:
+                lgpio.gpio_write(self.gpio_chip, STEERING_DIRECTION_PIN, 0)
+                lgpio.tx_pwm(self.gpio_chip, STEERING_PWM_PIN, PWM_FREQUENCY, centering_pwm)
+        elif self.steering_position == 'left':
+            self.steering_direction_right = True
+            status_table.update('steering_direction_right', True)
+            if GPIO_AVAILABLE and self.gpio_chip is not None:
+                lgpio.gpio_write(self.gpio_chip, STEERING_DIRECTION_PIN, 1)
+                lgpio.tx_pwm(self.gpio_chip, STEERING_PWM_PIN, PWM_FREQUENCY, centering_pwm)
+        else:
+            self._stop_steering()
+
     def _update_auto_brake(self, throttle_percentage: float):
         """Auto brake: ON when throttle is 0%, OFF when throttle > 0%"""
         if throttle_percentage == 0 and self.brake_duty == 0:
@@ -549,46 +627,50 @@ class RCCarController:
         duty_cycle = percentage
 
         if percentage > 0:
+            self.steering_centering = False
+            self.steering_position = 'right'
             self.steering_duty = duty_cycle
+            self.steering_direction_right = True
+            status_table.update('steering_position', 'right')
             status_table.update('steering_pwm', duty_cycle)
-            if not self.steering_direction_right:
-                self.steering_direction_right = True
-                status_table.update('steering_direction_right', True)
-                if GPIO_AVAILABLE and self.gpio_chip is not None:
-                    lgpio.gpio_write(self.gpio_chip, STEERING_DIRECTION_PIN, 1)
+            status_table.update('steering_direction_right', True)
             if GPIO_AVAILABLE and self.gpio_chip is not None:
+                lgpio.gpio_write(self.gpio_chip, STEERING_DIRECTION_PIN, 1)
                 lgpio.tx_pwm(self.gpio_chip, STEERING_PWM_PIN, PWM_FREQUENCY, duty_cycle)
-        elif self.steering_direction_right:
-            self.steering_duty = 0
-            self.steering_direction_right = False
-            status_table.update('steering_pwm', 0)
-            status_table.update('steering_direction_right', False)
-            if GPIO_AVAILABLE and self.gpio_chip is not None:
-                lgpio.gpio_write(self.gpio_chip, STEERING_DIRECTION_PIN, 0)
-                lgpio.tx_pwm(self.gpio_chip, STEERING_PWM_PIN, PWM_FREQUENCY, 0)
+        else:
+            self._stop_steering()
     
     def set_steering_left(self, percentage: float):
         duty_cycle = percentage
 
         if percentage > 0:
+            self.steering_centering = False
+            self.steering_position = 'left'
             self.steering_duty = duty_cycle
-            if self.steering_direction_right:
-                self.steering_direction_right = False
-                status_table.update('steering_direction_right', False)
-                if GPIO_AVAILABLE and self.gpio_chip is not None:
-                    lgpio.gpio_write(self.gpio_chip, STEERING_DIRECTION_PIN, 0)
-            else:
-                status_table.update('steering_direction_right', False)
+            self.steering_direction_right = False
+            status_table.update('steering_position', 'left')
             status_table.update('steering_pwm', duty_cycle)
-            if GPIO_AVAILABLE and self.gpio_chip is not None:
-                lgpio.tx_pwm(self.gpio_chip, STEERING_PWM_PIN, PWM_FREQUENCY, duty_cycle)
-        elif not self.steering_direction_right and self.steering_duty > 0:
-            self.steering_duty = 0
-            status_table.update('steering_pwm', 0)
             status_table.update('steering_direction_right', False)
             if GPIO_AVAILABLE and self.gpio_chip is not None:
                 lgpio.gpio_write(self.gpio_chip, STEERING_DIRECTION_PIN, 0)
-                lgpio.tx_pwm(self.gpio_chip, STEERING_PWM_PIN, PWM_FREQUENCY, 0)
+                lgpio.tx_pwm(self.gpio_chip, STEERING_PWM_PIN, PWM_FREQUENCY, duty_cycle)
+        else:
+            self._stop_steering()
+
+    def center_steering(self):
+        logger.info(f"Center steering requested from position {self.steering_position}")
+        if self._update_steering_center_input():
+            self.steering_position = 'center'
+            self.steering_direction_right = False
+            status_table.update('steering_position', 'center')
+            status_table.update('steering_direction_right', False)
+            self._stop_steering()
+            return
+
+        if self.steering_position in ('left', 'right'):
+            self.steering_centering = True
+        else:
+            self._stop_steering()
     
     def set_gear(self, gear: int):
         if 1 <= gear <= 3:
@@ -622,6 +704,23 @@ class RCCarController:
         status_table.update('honk', active)
         if GPIO_AVAILABLE and self.gpio_chip is not None:
             lgpio.gpio_write(self.gpio_chip, HONK_PIN, 1 if active else 0)
+
+    def get_state(self) -> dict:
+        self._update_steering_center_input()
+        return {
+            'type': 'state',
+            'throttle_pwm': float(self.throttle_duty),
+            'direction_active': bool(self.direction_active),
+            'steering_pwm': float(self.steering_duty),
+            'steering_direction_right': bool(self.steering_direction_right),
+            'steering_position': self.steering_position,
+            'steering_center_input': bool(self.steering_center_input),
+            'brake': float(self.brake_duty),
+            'lights': bool(self.lights_on),
+            'auto_mode': bool(self.auto_mode),
+            'honk': bool(self.honk_active),
+            'gear': int(self.current_gear),
+        }
     
     def set_all_low(self):
         """Set ALL pins to LOW (safe state)"""
@@ -629,6 +728,8 @@ class RCCarController:
         self.direction_active = False
         self.steering_duty = 0
         self.steering_direction_right = False
+        self.steering_position = 'center'
+        self.steering_centering = False
         self.brake_duty = 0
         self.lights_on = False
         self.auto_mode = False
@@ -639,6 +740,7 @@ class RCCarController:
         status_table.update('direction', False)
         status_table.update('steering_pwm', 0)
         status_table.update('steering_direction_right', False)
+        status_table.update('steering_position', 'center')
         status_table.update('brake', 0)
         status_table.update('lights', False)
         status_table.update('auto_mode', False)
@@ -660,6 +762,7 @@ class RCCarController:
     
     def cleanup(self):
         """Cleanup GPIO resources"""
+        self._steering_worker_running = False
         if GPIO_AVAILABLE and self.gpio_chip is not None:
             self.set_all_low()
             
@@ -667,6 +770,7 @@ class RCCarController:
             lgpio.gpio_free(self.gpio_chip, DIRECTION_PIN)
             lgpio.gpio_free(self.gpio_chip, STEERING_DIRECTION_PIN)
             lgpio.gpio_free(self.gpio_chip, STEERING_PWM_PIN)
+            lgpio.gpio_free(self.gpio_chip, STEERING_CENTER_INPUT_PIN)
             lgpio.gpio_free(self.gpio_chip, LIGHTS_PIN)
             lgpio.gpio_free(self.gpio_chip, AUTO_PIN)
             lgpio.gpio_free(self.gpio_chip, BRAKE_PIN)
@@ -695,6 +799,7 @@ async def websocket_handler(request):
     client_address = request.remote
     connected_clients.add(ws)
     status_table.update('clients', len(connected_clients))
+    await ws.send_json(rc_car.get_state())
     
     try:
         async for msg in ws:
@@ -727,6 +832,9 @@ async def websocket_handler(request):
                         value = data.get('value', False)
                         rc_car.set_honk(value)
                     
+                    elif command_type == 'steering_center':
+                        rc_car.center_steering()
+
                     elif command_type == 'settings':
                         gear = data.get('gear', 1)
                         lights = data.get('lights', False)
@@ -734,6 +842,11 @@ async def websocket_handler(request):
                         rc_car.set_gear(gear)
                         rc_car.set_lights(lights)
                         rc_car.set_auto_mode(auto)
+
+                    elif command_type == 'get_state':
+                        pass
+
+                    await ws.send_json(rc_car.get_state())
                     
                 except json.JSONDecodeError:
                     logger.error(f"Invalid JSON received: {msg.data}")
